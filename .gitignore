@@ -1,0 +1,110 @@
+# ============================================================
+#  ArgusCX — .gitignore
+# ============================================================
+
+# Environment & Secrets
+.env
+.env.local
+.env.production
+.env.staging
+*.pem
+*.key
+*.cert
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+pip-log.txt
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+.hypothesis/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.vercel/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Database
+*.db
+*.sqlite3
+*.sqlite
+dump.sql
+pgdata/
+mongodata/
+redisdata/
+
+# Docker volumes (local)
+docker-volumes/
+.docker/
+
+# Vector DB local storage
+chroma_data/
+faiss_index/
+*.pkl
+*.npy
+
+# MLflow / AI artifacts
+mlruns/
+mlartifacts/
+*.onnx
+*.pt
+*.pth
+models/weights/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.cursor/
+
+# Uploads / Evidence files (local dev)
+uploads/
+evidence/
+temp/
+tmp/
+
+# Build artifacts
+*.tar.gz
+*.zip
+dist/
+build/
+
+# Kubernetes secrets
+kubeconfig
+*.kubeconfig
+k8s/secrets/

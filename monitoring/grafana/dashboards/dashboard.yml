@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: ArgusCX
+    orgId: 1
+    folder: ArgusCX
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

@@ -1,0 +1,252 @@
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────────
+  #  FRONTEND — Next.js 14
+  # ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: arguscx-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+      - NEXT_PUBLIC_APP_NAME=ArgusCX
+      - NEXT_PUBLIC_DEMO_MODE=${NEXT_PUBLIC_DEMO_MODE:-true}
+    depends_on:
+      - backend
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  BACKEND — FastAPI
+  # ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: arguscx-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      - uploads_data:/app/uploads
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  CELERY WORKER (Background Tasks)
+  # ─────────────────────────────────────────────
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: arguscx-celery
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  NGINX — Reverse Proxy
+  # ─────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: arguscx-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  POSTGRESQL — Primary Operational DB
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: arguscx-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-arguscx}
+      POSTGRES_USER: ${POSTGRES_USER:-arguscx_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arguscx_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-arguscx_user} -d ${POSTGRES_DB:-arguscx}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  MONGODB — Conversations & Logs
+  # ─────────────────────────────────────────────
+  mongodb:
+    image: mongo:7.0
+    container_name: arguscx-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-arguscx_mongo_user}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-arguscx_mongo_password}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-arguscx_logs}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  REDIS — Cache, Sessions & Task Queue
+  # ─────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: arguscx-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-arguscx_redis_password} --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-arguscx_redis_password}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  CHROMADB — Local Vector Store (RAG)
+  # ─────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: arguscx-chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  MINIO — Local S3-compatible File Storage
+  # ─────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: arguscx-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minio_access_key}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minio_secret_key}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  PROMETHEUS — Metrics Collection
+  # ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: arguscx-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  #  GRAFANA — Metrics Visualization
+  # ─────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: arguscx-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-arguscx_grafana}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - arguscx-network
+    restart: unless-stopped
+
+# ─────────────────────────────────────────────
+#  NETWORKS
+# ─────────────────────────────────────────────
+networks:
+  arguscx-network:
+    driver: bridge
+    name: arguscx-network
+
+# ─────────────────────────────────────────────
+#  VOLUMES
+# ─────────────────────────────────────────────
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  chroma_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  uploads_data:
