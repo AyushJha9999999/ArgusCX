@@ -1,136 +1,137 @@
 """
 ArgusCX — Resolution Agent
-Applies policy engine and makes final resolution decision.
+Applies policy engine and makes final resolution decision using Groq LLM.
+Uses centralized prompts and the policy engine service.
 """
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import structlog
+from pydantic import BaseModel, Field
+from langchain_core.prompts import ChatPromptTemplate
 from app.models.schemas import AgentState, ResolutionDecision, FraudRiskLevel, TicketCategory
 from app.core.config import settings
+from app.core.llm import get_llm
+from app.services.prompt_manager import get_system_prompt
+from app.services.policy_engine import evaluate_policies
+import json
 
 logger = structlog.get_logger(__name__)
 
 
+class ResolutionOutput(BaseModel):
+    decision: ResolutionDecision = Field(description="The final resolution decision")
+    message: str = Field(description="The customer-facing message explaining the resolution.")
+    confidence: float = Field(description="Confidence score between 0.0 and 1.0.")
+    should_escalate: bool = Field(description="True if human intervention is required, False otherwise.")
+    escalation_reason: Optional[str] = Field(default=None, description="Reason for escalation if applicable, else null.")
+    reasoning: str = Field(description="Internal reasoning chain for this decision.")
+
+
 async def run_resolution_agent(state: AgentState) -> Dict[str, Any]:
     """
-    Applies policy rules to reach a resolution decision.
-    Returns decision, customer-facing message, confidence, and escalation flag.
+    Uses Groq LLM + Policy Engine to make a resolution decision.
+    No hardcoded logic — everything goes through the LLM.
     """
     logger.info("✅ Resolution agent running", ticket_id=state.ticket.id)
 
-    fraud = state.fraud_analysis
-    category = state.ticket.category
-    order = state.order_data or {}
-    payment = state.payment_data or {}
+    # ── Step 1: Evaluate policies via LLM ────────────
+    policy_result = await evaluate_policies(
+        category=state.ticket.category.value if state.ticket.category else "general",
+        message=state.ticket.message,
+        retrieved_policies=state.retrieved_policies,
+        fraud_score=state.fraud_analysis.fraud_score if state.fraud_analysis else 0.0,
+        order_data=state.order_data,
+    )
 
-    # ── Fraud Rejection ───────────────────────
-    if fraud and fraud.fraud_risk_level in [FraudRiskLevel.CRITICAL]:
-        return {
-            "decision": ResolutionDecision.FRAUD_REJECT,
-            "message": (
-                "We've reviewed your request and our verification system detected "
-                "inconsistencies in the submitted evidence. This case has been "
-                "escalated to our Trust & Safety team. If you believe this is an "
-                "error, please contact us with additional documentation."
-            ),
-            "confidence": 0.95,
-            "should_escalate": True,
-            "escalation_reason": "Critical fraud indicators detected — AI-generated evidence",
-            "reasoning": "FRAUD_REJECT: Critical fraud score from Evidence Verification agent.",
-        }
-
-    # ── High Risk → Human Review ──────────────
-    if fraud and fraud.fraud_risk_level == FraudRiskLevel.HIGH:
+    # ── Step 2: Make resolution decision via LLM ─────
+    llm = get_llm(temperature=0.1)
+    if not llm:
+        logger.warning("No LLM configured for resolution — defaulting to escalation")
         return {
             "decision": ResolutionDecision.ESCALATE_TO_HUMAN,
-            "message": (
-                "Your case is under review by our specialized team. "
-                "We aim to resolve this within 24 hours. "
-                "You'll receive an update via email shortly."
-            ),
-            "confidence": 0.70,
+            "message": "Your case has been forwarded to a specialist for review.",
+            "confidence": 0.5,
             "should_escalate": True,
-            "escalation_reason": "High fraud risk score — human verification required",
-            "reasoning": "ESCALATE: High fraud risk (score > 0.65). Requires human review.",
+            "escalation_reason": "LLM not available for resolution",
+            "reasoning": "No LLM configured — escalating to human agent.",
         }
 
-    # ── Order/Refund Auto-Resolution ──────────
-    if category in [TicketCategory.ORDER_REFUND, None] and fraud and not fraud.is_suspicious:
-        amount = order.get("total_amount", 0)
-        currency = order.get("currency", "INR")
-        order_id = order.get("order_id", "your order")
-        return {
-            "decision": ResolutionDecision.AUTO_RESOLVE,
-            "message": (
-                f"We've verified your damaged item report for {order_id}. "
-                f"A full refund of {currency} {amount:.2f} has been initiated. "
-                f"You will receive the amount within 3-5 business days. "
-                f"We apologize for the inconvenience."
-            ),
-            "confidence": 0.92,
-            "should_escalate": False,
-            "escalation_reason": None,
-            "reasoning": (
-                f"AUTO_RESOLVE: Order verified ({order_id}), "
-                f"evidence clean (fraud_score={fraud.fraud_score:.2f}), "
-                f"policy permits full refund for verified damage."
-            ),
-        }
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", get_system_prompt("resolution")),
+        ("user", """Ticket ID: {ticket_id}
+Subject: {subject}
+Message: {message}
 
-    # ── Payment Dispute ───────────────────────
-    if category == TicketCategory.BILLING_PAYMENT:
-        py_id = payment.get("payment_id", "your payment")
+Retrieved Policies:
+{policies}
+
+Policy Engine Assessment:
+- Applicable Policies: {applicable_policies}
+- Permitted Actions: {permitted_actions}
+- Constraints: {constraints}
+- Auto-Resolve Eligible: {auto_resolve}
+- Policy Reasoning: {policy_reasoning}
+
+Fraud Analysis:
+{fraud_analysis}
+
+Investigation Data:
+- Order: {order_data}
+- Payment: {payment_data}
+- Anomalies Found: {anomalies}
+- Investigation Reasoning: {investigation_reasoning}
+"""),
+    ])
+
+    structured_llm = llm.with_structured_output(ResolutionOutput)
+    chain = prompt | structured_llm
+
+    try:
+        fraud_json = state.fraud_analysis.model_dump_json() if state.fraud_analysis else "No evidence provided."
+        order_json = json.dumps(state.order_data, default=str) if state.order_data else "No order data found."
+        payment_json = json.dumps(state.payment_data, default=str) if state.payment_data else "No payment data."
+        policies_text = "\n".join(state.retrieved_policies) if state.retrieved_policies else "No policies retrieved."
+
+        # Get investigation anomalies from agent steps
+        investigation_step = next(
+            (s for s in state.ticket.agent_steps if s.agent_type.value == "data_investigation"),
+            None,
+        )
+        anomalies = investigation_step.output_data.get("anomalies", []) if investigation_step else []
+        inv_reasoning = investigation_step.output_data.get("reasoning", "No investigation data.") if investigation_step else "No investigation data."
+
+        result: ResolutionOutput = await chain.ainvoke({
+            "ticket_id": state.ticket.id,
+            "subject": state.ticket.subject,
+            "message": state.ticket.message,
+            "policies": policies_text,
+            "applicable_policies": ", ".join(policy_result.applicable_policies),
+            "permitted_actions": ", ".join(policy_result.permitted_actions),
+            "constraints": ", ".join(policy_result.constraints) if policy_result.constraints else "None",
+            "auto_resolve": policy_result.auto_resolve_eligible,
+            "policy_reasoning": policy_result.reasoning,
+            "fraud_analysis": fraud_json,
+            "order_data": order_json,
+            "payment_data": payment_json,
+            "anomalies": ", ".join(anomalies) if anomalies else "None detected",
+            "investigation_reasoning": inv_reasoning,
+        })
+
+        logger.info(
+            "Resolution decision made",
+            decision=result.decision.value,
+            confidence=result.confidence,
+            should_escalate=result.should_escalate,
+        )
+
+        return result.model_dump()
+    except Exception as e:
+        logger.error("LLM Resolution failed", error=str(e))
         return {
             "decision": ResolutionDecision.ESCALATE_TO_HUMAN,
-            "message": (
-                f"We're investigating your payment dispute for {py_id}. "
-                f"Our billing team has been notified and will contact you within 2 business days. "
-                f"Reference case: #{state.ticket.id[:8].upper()}"
-            ),
-            "confidence": 0.82,
+            "message": "Your case is being reviewed by our team. We'll get back to you shortly.",
+            "confidence": 0.5,
             "should_escalate": True,
-            "escalation_reason": "Payment dispute requires billing team review",
-            "reasoning": "ESCALATE: Payment disputes require human billing team investigation.",
+            "escalation_reason": f"Resolution LLM error: {str(e)[:60]}",
+            "reasoning": f"Resolution agent encountered an error: {str(e)[:80]}",
+            "error": str(e),
         }
-
-    # ── Account Issues ────────────────────────
-    if category == TicketCategory.ACCOUNT:
-        return {
-            "decision": ResolutionDecision.ESCALATE_TO_HUMAN,
-            "message": (
-                "For security reasons, your account issue has been escalated "
-                "to our Account Security team. We'll contact you via your registered "
-                "email within 24 hours."
-            ),
-            "confidence": 0.88,
-            "should_escalate": True,
-            "escalation_reason": "Account security issue requires identity verification",
-            "reasoning": "ESCALATE: Account issues require identity verification by security team.",
-        }
-
-    # ── Low Confidence → Request More Info ────
-    if not state.retrieved_policies and not order:
-        return {
-            "decision": ResolutionDecision.REQUEST_MORE_INFO,
-            "message": (
-                "Thank you for reaching out. To better assist you, could you please "
-                "provide your order number, a description of the issue, and any "
-                "relevant photos or documents?"
-            ),
-            "confidence": 0.45,
-            "should_escalate": False,
-            "escalation_reason": None,
-            "reasoning": "REQUEST_MORE_INFO: Insufficient context to make a resolution decision.",
-        }
-
-    # ── Default Escalation ────────────────────
-    return {
-        "decision": ResolutionDecision.ESCALATE_TO_HUMAN,
-        "message": (
-            "We've reviewed your case and it requires personalized attention. "
-            "A support specialist will contact you within 4 hours."
-        ),
-        "confidence": 0.60,
-        "should_escalate": True,
-        "escalation_reason": "Could not auto-resolve with available context",
-        "reasoning": "ESCALATE: Default fallback — insufficient confidence for auto-resolution.",
-    }

@@ -1,32 +1,118 @@
 """
 ArgusCX — Escalation Agent
-Packages full case file for human handoff and notifies via Slack.
+Packages full case file for human handoff and notifies via Slack using Groq LLM.
 """
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import structlog
+from pydantic import BaseModel, Field
+from langchain_core.prompts import ChatPromptTemplate
 from app.models.schemas import AgentState, AgentType, TicketStatus
 from app.core.config import settings
+from app.core.llm import get_llm
+import json
 
 logger = structlog.get_logger(__name__)
 
 
+class EscalationOutput(BaseModel):
+    summary: str = Field(description="A comprehensive summary of the case for the human agent.")
+    priority: str = Field(description="The priority level of the case: LOW, MEDIUM, HIGH, CRITICAL.")
+    assigned_team: str = Field(description="The recommended team to handle the case: Trust & Safety, Billing, Account Security, or Level-2 Support.")
+    recommended_action: str = Field(description="Specific actionable recommendations for the human agent based on policies and fraud analysis.")
+
+
+def _get_demo_escalation(state: AgentState) -> Dict[str, Any]:
+    fraud = state.fraud_analysis
+    risk_score = state.risk_score
+    confidence = state.confidence_score
+
+    priority = "LOW"
+    if risk_score >= 0.8: priority = "CRITICAL"
+    elif risk_score >= 0.65: priority = "HIGH"
+    elif confidence < 0.6: priority = "MEDIUM"
+
+    team = "Level-2 Support"
+    if fraud and fraud.is_suspicious: team = "Trust & Safety"
+    elif state.ticket.category and "payment" in state.ticket.category.value: team = "Billing"
+    elif state.ticket.category and "account" in state.ticket.category.value: team = "Account Security"
+
+    recommendation = "Standard escalation review. Customer context and policies are attached."
+    if fraud and fraud.fraud_risk_level.value in ["high", "critical"]:
+        recommendation = "Review evidence for fraud. Cross-check with Trust & Safety database before any refund."
+    elif confidence < 0.6:
+        recommendation = "Review retrieved policies and contact customer for additional information."
+
+    summary = f"Customer submitted a ticket. Confidence: {confidence:.2f}. Risk: {risk_score:.2f}. Escalation reason: {state.escalation_reason}."
+    
+    return {
+        "summary": summary,
+        "priority": priority,
+        "assigned_team": team,
+        "recommended_action": recommendation
+    }
+
+
 async def run_escalation_agent(state: AgentState) -> Dict[str, Any]:
     """
-    Builds a comprehensive case file and routes to the right human team.
+    Builds a comprehensive case file and routes to the right human team using Groq LLM.
     Optionally sends Slack notification.
     """
     logger.info("🚨 Escalation agent packaging case", ticket_id=state.ticket.id)
 
+    llm = get_llm(temperature=0.2)
+    
+    if not llm:
+        logger.warning("No LLM provider configured, using heuristic escalation packaging.")
+        escalation_data = _get_demo_escalation(state)
+    else:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are the Escalation Handoff Agent for ArgusCX.
+Your job is to review a ticket that the AI failed to resolve or flagged for fraud, and package a concise but comprehensive briefing for the human support agent who will take over.
+
+Determine the priority, the best team to assign to, write a summary, and give a recommended action based on the AI's reasoning, fraud analysis, and policies."""),
+            ("user", """Ticket Subject: {subject}
+Ticket Message: {message}
+AI Escalation Reason: {escalation_reason}
+AI Confidence Score: {confidence}
+AI Risk Score: {risk_score}
+
+Fraud Analysis: {fraud}
+Order/Payment Data: {data}
+Retrieved Policies: {policies}""")
+        ])
+        
+        structured_llm = llm.with_structured_output(EscalationOutput)
+        chain = prompt | structured_llm
+        
+        try:
+            fraud_json = state.fraud_analysis.model_dump_json() if state.fraud_analysis else "None"
+            data_json = json.dumps({"order": state.order_data, "payment": state.payment_data})
+            policies_text = "\\n".join(state.retrieved_policies) if state.retrieved_policies else "None"
+            
+            result: EscalationOutput = await chain.ainvoke({
+                "subject": state.ticket.subject,
+                "message": state.ticket.message,
+                "escalation_reason": state.escalation_reason or "Unknown",
+                "confidence": state.confidence_score,
+                "risk_score": state.risk_score,
+                "fraud": fraud_json,
+                "data": data_json,
+                "policies": policies_text
+            })
+            escalation_data = result.model_dump()
+        except Exception as e:
+            logger.error("LLM Escalation failed, falling back to heuristic.", error=str(e))
+            escalation_data = _get_demo_escalation(state)
+
     ticket = state.ticket
     fraud = state.fraud_analysis
 
-    # Build full case file for human agent
     case_file = {
         "case_id": ticket.id,
         "generated_at": datetime.utcnow().isoformat(),
-        "priority": _determine_priority(state),
-        "summary": _build_summary(state),
+        "priority": escalation_data["priority"],
+        "summary": escalation_data["summary"],
         "customer_profile": {
             "id": ticket.customer.id,
             "name": ticket.customer.name,
@@ -69,14 +155,12 @@ async def run_escalation_agent(state: AgentState) -> Dict[str, Any]:
             "fraud": fraud.fraud_score if fraud else 0.0,
         },
         "escalation_reason": state.escalation_reason,
-        "recommended_action": _recommend_action(state),
+        "recommended_action": escalation_data["recommended_action"],
     }
 
-    # Update ticket with case file
     state.ticket.case_file = case_file
     state.ticket.status = TicketStatus.ESCALATED
 
-    # Send Slack notification (if configured)
     if settings.SLACK_WEBHOOK_URL and not settings.is_demo_mode:
         await _notify_slack(case_file)
     else:
@@ -84,59 +168,15 @@ async def run_escalation_agent(state: AgentState) -> Dict[str, Any]:
 
     return {
         "case_file": case_file,
-        "assigned_team": _determine_team(state),
+        "assigned_team": escalation_data["assigned_team"],
         "confidence": 1.0,
         "reasoning": (
             f"Case packaged for human review. "
             f"Priority: {case_file['priority']}. "
             f"Reason: {state.escalation_reason}. "
-            f"Assigned to: {_determine_team(state)} team."
+            f"Assigned to: {escalation_data['assigned_team']} team."
         ),
     }
-
-
-def _build_summary(state: AgentState) -> str:
-    fraud = state.fraud_analysis
-    fraud_str = ""
-    if fraud and fraud.is_suspicious:
-        fraud_str = f" FRAUD RISK: {fraud.fraud_risk_level.value.upper()} (score: {fraud.fraud_score:.2f})."
-
-    return (
-        f"Customer {state.ticket.customer.name} submitted a {state.ticket.category.value if state.ticket.category else 'general'} ticket. "
-        f"Confidence score: {state.confidence_score:.2f}. Risk score: {state.risk_score:.2f}.{fraud_str} "
-        f"Escalation reason: {state.escalation_reason}."
-    )
-
-
-def _determine_priority(state: AgentState) -> str:
-    if state.risk_score >= 0.8:
-        return "CRITICAL"
-    if state.risk_score >= 0.65:
-        return "HIGH"
-    if state.confidence_score < 0.6:
-        return "MEDIUM"
-    return "LOW"
-
-
-def _determine_team(state: AgentState) -> str:
-    fraud = state.fraud_analysis
-    if fraud and fraud.is_suspicious:
-        return "Trust & Safety"
-    category = state.ticket.category
-    if category and "payment" in category.value:
-        return "Billing"
-    if category and "account" in category.value:
-        return "Account Security"
-    return "Level-2 Support"
-
-
-def _recommend_action(state: AgentState) -> str:
-    fraud = state.fraud_analysis
-    if fraud and fraud.fraud_risk_level.value in ["high", "critical"]:
-        return "Review evidence for fraud. Cross-check with Trust & Safety database before any refund."
-    if state.confidence_score < 0.6:
-        return "Review retrieved policies and contact customer for additional information."
-    return "Standard escalation review. Customer context and policies are attached."
 
 
 async def _notify_slack(case_file: Dict[str, Any]):

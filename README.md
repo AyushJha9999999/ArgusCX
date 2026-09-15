@@ -54,6 +54,24 @@ Customer Channels (Web / Mobile / WhatsApp / Email / Voice / Social)
 
 ## 🚀 Quick Start
 
+## 🔌 Production Integrations & API Docs
+
+The canonical partner setup is documented in [docs/INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md). The running OpenAPI contract is available at `http://localhost:8000/docs` and the machine-readable schema at `http://localhost:8000/openapi.json`.
+
+ArgusCX needs one platform API key for each company integration. Provider credentials are optional per capability and must remain server-side:
+
+| Capability | Credentials | Status in this project |
+|---|---|---|
+| AI reasoning | `GROQ_API_KEY` | Live Groq path; heuristic fallback without it |
+| E-commerce orders/customers | `SHOPIFY_ACCESS_TOKEN`, `SHOPIFY_SHOP_DOMAIN` | Live Shopify REST connector |
+| Stripe payments | `STRIPE_SECRET_KEY` | Live read connector |
+| Razorpay payments | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | Live read connector |
+| Slack escalation alerts | `SLACK_WEBHOOK_URL` | Live outbound notification |
+| Browser/API access | `ARGUSCX_MASTER_KEY` or a generated `acx_live_...` key | Required for protected API routes |
+| Evidence storage | none for local demo; S3/MinIO credentials for production storage | Local filesystem currently active |
+
+Zendesk, Intercom, Salesforce, HubSpot, WhatsApp, email, voice, and arbitrary company websites need dedicated adapters or webhooks; they are not automatically supported just by adding a key.
+
 ### Prerequisites
 - Python 3.11+
 - Node.js 18+

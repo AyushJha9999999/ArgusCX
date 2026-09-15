@@ -187,7 +187,7 @@ async def process_ticket(state: AgentState) -> AgentState:
         has_evidence=bool(state.ticket.evidence_files),
     )
     result = await _graph.ainvoke(state)
-    return result
+    return AgentState(**result)
 
 
 # ─────────────────────────────────────────────
