@@ -4,36 +4,31 @@
 /* ArgusCX — Global Design System */
 
 :root {
-  /* Core palette */
-  --bg-primary: #080a0b;
-  --bg-secondary: #0e1112;
-  --bg-card: rgba(19, 24, 24, 0.9);
-  --bg-glass: rgba(255, 255, 255, 0.035);
+  /* ArgusCX Strict Palette */
+  --bg-primary: #07090D;
+  --bg-secondary: #0B0F14;
+  --bg-surface: #0E1319;
+  --bg-card: #0E1319;
+  --bg-elevated: #111820;
+  --bg-hover: #151C24;
+  
+  --border: #1C252F;
+  --border-strong: #26323D;
+  --border-accent: rgba(155, 231, 197, 0.2);
+  
+  --text-primary: #F3F6F8;
+  --text-secondary: #8B96A3;
+  --text-muted: #5D6875;
+  
+  --accent: #9BE7C5;
+  --accent-dim: #74D9C2;
+  
+  --success: #67D6A3;
+  --warning: #F3B85B;
+  --danger: #FF6B7A;
+  --info: #73B8FF;
 
-  /* Accent */
-  --accent: #9fe3c4;
-  --accent-dim: #347e6d;
-  --accent-glow: rgba(159, 227, 196, 0.2);
-  --accent-ultra: rgba(159, 227, 196, 0.065);
-
-  /* Status */
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --critical: #dc2626;
-  --info: #6366f1;
-
-  /* Text */
-  --text-primary: #f3f1ea;
-  --text-secondary: #a1a8a8;
-  --text-muted: #687174;
-
-  /* Border */
-  --border: rgba(216, 224, 221, 0.12);
-  --border-accent: rgba(114, 214, 201, 0.38);
-
-  /* Typography */
-  --font-sans: "Manrope", sans-serif;
+  --font-sans: "Inter", "Geist", "Manrope", sans-serif;
   --font-mono: "Space Mono", monospace;
 }
 
@@ -64,8 +59,6 @@ html {
 
 body {
   background: var(--bg-primary);
-  background-image: radial-gradient(circle at 72% -10%, rgba(159, 227, 196, 0.09), transparent 28%), linear-gradient(rgba(255,255,255,0.014) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.014) 1px, transparent 1px);
-  background-size: auto, 52px 52px, 52px 52px;
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -139,12 +132,12 @@ body {
 /* ─────────────────────────────────────────── */
 
 .glass-card {
-  background: var(--bg-card);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border);
+  background: rgba(14, 19, 25, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.025);
+  box-shadow: none;
 }
 
 .glass-card-accent {
@@ -575,3 +568,73 @@ code {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
   .mouse-follower { display: none; }
 }
+
+/* ========================================================
+   VERIFICATION CASES V2 PREMIUM STYLES
+   ======================================================== */
+.glass-panel {
+  background: rgba(15, 15, 25, 0.4);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+}
+
+.neon-text {
+  background: linear-gradient(90deg, #00F0FF, #FF00E5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 20px rgba(255, 0, 229, 0.3);
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+@keyframes pulse-glow-v2 {
+  0% { box-shadow: 0 0 15px #00F0FF; }
+  50% { box-shadow: 0 0 30px #FF00E5; }
+  100% { box-shadow: 0 0 15px #00F0FF; }
+}
+
+.btn-premium {
+  background: linear-gradient(90deg, #1e1e2f, #2a2a40);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-premium::before {
+  content: '';
+  position: absolute;
+  top: -2px; left: -2px; right: -2px; bottom: -2px;
+  background: linear-gradient(45deg, #00F0FF, #FF00E5, #00F0FF);
+  z-index: -1;
+  border-radius: 9px;
+  animation: pulse-glow-v2 3s linear infinite;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.btn-premium:hover::before {
+  opacity: 1;
+}
+
+.btn-premium:hover {
+  transform: translateY(-2px);
+}
+
+
+@keyframes fade-in-up {
+  0% { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+

@@ -205,6 +205,9 @@ export default function HomePage() {
         </p>
 
         <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+          <Link href="/onboarding" className="btn-primary" style={{ fontSize: 15, padding: "13px 28px", background: 'linear-gradient(90deg, #00F0FF, #FF00E5)', border: 'none' }}>
+            Get Started (Verification)
+          </Link>
           <Link href="/dashboard/chat" className="btn-primary" style={{ fontSize: 15, padding: "13px 28px" }}>
             Start investigation
           </Link>

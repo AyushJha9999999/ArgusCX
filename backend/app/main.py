@@ -13,7 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.openapi.utils import get_openapi
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app.api.routes import tickets, agents, analytics, knowledge, evidence, health, auth, api_keys
+from app.api.routes import tickets, agents, analytics, knowledge, evidence, health, auth, api_keys, sessions, cases, demo
 from app.api.websockets import ticket_ws
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -140,6 +140,9 @@ app.include_router(agents.router, prefix=API_PREFIX, tags=["Agents"])
 app.include_router(analytics.router, prefix=API_PREFIX, tags=["Analytics"])
 app.include_router(knowledge.router, prefix=API_PREFIX, tags=["Knowledge Base"])
 app.include_router(evidence.router, prefix=API_PREFIX, tags=["Evidence & Fraud"])
+app.include_router(sessions.router, prefix=API_PREFIX, tags=["Sessions"])
+app.include_router(cases.router, prefix=API_PREFIX, tags=["Cases"])
+app.include_router(demo.router, prefix=API_PREFIX, tags=["Demo"])
 
 # WebSocket
 app.include_router(ticket_ws.router, tags=["WebSocket"])
