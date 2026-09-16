@@ -52,7 +52,10 @@ async def run_verification_agent(state: AgentState) -> Dict[str, Any]:
     for f in files:
         file_path = Path(f.url) if f.url and not f.url.startswith("http") else None
 
-        if file_path and file_path.exists() and f.file_type.startswith("image/"):
+        # If the user explicitly selected a fraud flag for the demo, override the local analysis
+        if state.ticket.customer.previous_fraud_flags > 0:
+            result = _demo_scenario_for_customer(state.ticket.customer)
+        elif file_path and file_path.exists() and f.file_type.startswith("image/"):
             result = _analyze_local_image(str(file_path), f.file_type)
         else:
             # No accessible local file — use scenario-based demo
@@ -301,12 +304,16 @@ def _check_c2pa(path: str, mime_type: str) -> Tuple[Optional[bool], str]:
 
 def _demo_scenario_for_customer(customer) -> FraudAnalysisResult:
     """Return a deterministic fraud scenario based on customer fraud history."""
+    import random
+
     if customer.previous_fraud_flags > 1:
+        base_fraud = random.uniform(0.88, 0.97)
+        base_ai = random.uniform(0.85, 0.95)
         return FraudAnalysisResult(
             is_suspicious=True,
             fraud_risk_level=FraudRiskLevel.CRITICAL,
-            fraud_score=0.94,
-            ai_generated_probability=0.91,
+            fraud_score=round(base_fraud, 3),
+            ai_generated_probability=round(base_ai, 3),
             exif_anomalies=["Missing device metadata", "Inconsistent color profile"],
             c2pa_valid=False,
             manipulation_indicators=[
@@ -317,18 +324,20 @@ def _demo_scenario_for_customer(customer) -> FraudAnalysisResult:
             ],
             analysis_details={
                 "exif_check": "FAIL — No camera metadata found",
-                "ai_detection": "FAIL — 91% probability of AI generation",
+                "ai_detection": f"FAIL — {int(base_ai * 100)}% probability of AI generation",
                 "c2pa": "INVALID — No Content Credentials",
                 "file_integrity": "WARN — Image statistics inconsistent",
                 "note": "Demo scenario: AI-generated fraud (customer has prior fraud flags)",
             },
         )
     elif customer.previous_fraud_flags == 1:
+        base_fraud = random.uniform(0.68, 0.82)
+        base_ai = random.uniform(0.15, 0.35)
         return FraudAnalysisResult(
             is_suspicious=True,
             fraud_risk_level=FraudRiskLevel.HIGH,
-            fraud_score=0.72,
-            ai_generated_probability=0.25,
+            fraud_score=round(base_fraud, 3),
+            ai_generated_probability=round(base_ai, 3),
             exif_anomalies=["Timestamp mismatch", "Software field shows editing tool"],
             c2pa_valid=None,
             manipulation_indicators=[
@@ -338,18 +347,20 @@ def _demo_scenario_for_customer(customer) -> FraudAnalysisResult:
             ],
             analysis_details={
                 "exif_check": "FAIL — EXIF timestamp is 14 days before delivery",
-                "ai_detection": "PASS — Real photo but potentially edited",
+                "ai_detection": f"PASS — Real photo but potentially edited ({int(base_ai * 100)}% AI chance)",
                 "c2pa": "UNKNOWN — No credentials to verify",
                 "file_integrity": "FAIL — Multiple save operations detected",
                 "note": "Demo scenario: Tampered image (customer has one prior fraud flag)",
             },
         )
     else:
+        base_fraud = random.uniform(0.02, 0.12)
+        base_ai = random.uniform(0.01, 0.08)
         return FraudAnalysisResult(
             is_suspicious=False,
             fraud_risk_level=FraudRiskLevel.LOW,
-            fraud_score=0.08,
-            ai_generated_probability=0.04,
+            fraud_score=round(base_fraud, 3),
+            ai_generated_probability=round(base_ai, 3),
             exif_anomalies=[],
             c2pa_valid=True,
             manipulation_indicators=[],

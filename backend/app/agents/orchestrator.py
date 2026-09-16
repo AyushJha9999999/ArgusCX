@@ -17,6 +17,7 @@ from app.agents.investigation import run_investigation_agent
 from app.agents.verification import run_verification_agent
 from app.agents.resolution import run_resolution_agent
 from app.agents.escalation import run_escalation_agent
+from app.services.scoring_engine import compute_scores
 
 logger = structlog.get_logger(__name__)
 
@@ -65,10 +66,7 @@ async def verification_node(state: AgentState) -> AgentState:
 
     result = await run_verification_agent(state)
     state.fraud_analysis = result.get("fraud_analysis")
-
-    # Update risk score based on fraud analysis
-    if state.fraud_analysis:
-        state.risk_score = state.fraud_analysis.fraud_score
+    # Risk score will be computed by scoring engine after resolution
 
     _add_agent_step(state, AgentType.EVIDENCE_VERIFICATION, result, start)
     state.completed_agents.append(AgentType.EVIDENCE_VERIFICATION)
@@ -84,9 +82,38 @@ async def resolution_node(state: AgentState) -> AgentState:
     result = await run_resolution_agent(state)
     state.resolution_decision = result.get("decision")
     state.resolution_message = result.get("message")
-    state.confidence_score = result.get("confidence", 0.0)
+    llm_confidence = result.get("confidence", 0.0)
     state.should_escalate = result.get("should_escalate", False)
     state.escalation_reason = result.get("escalation_reason")
+
+    # ── Multi-signal scoring engine ───────────────────────────
+    # Runs AFTER all agents complete so it has all available signals.
+    # Produces three distinct scores (fraud ≠ risk ≠ confidence).
+    try:
+        scores = compute_scores(state)
+        state.risk_score = scores["risk_score"]
+        # Blend LLM confidence with signal-based confidence (60/40)
+        if llm_confidence > 0:
+            state.confidence_score = round(
+                llm_confidence * 0.60 + scores["confidence_score"] * 0.40, 3
+            )
+        else:
+            state.confidence_score = scores["confidence_score"]
+        # Update fraud_analysis fraud_score with engine score if more refined
+        if state.fraud_analysis:
+            import dataclasses
+            state.fraud_analysis = state.fraud_analysis.model_copy(
+                update={"fraud_score": scores["fraud_score"]}
+            )
+        logger.info(
+            "Scoring engine applied",
+            fraud=scores["fraud_score"],
+            risk=scores["risk_score"],
+            confidence=state.confidence_score,
+        )
+    except Exception as e:
+        logger.error("Scoring engine failed, using LLM confidence", error=str(e))
+        state.confidence_score = llm_confidence
 
     _add_agent_step(state, AgentType.RESOLUTION, result, start)
     state.completed_agents.append(AgentType.RESOLUTION)
