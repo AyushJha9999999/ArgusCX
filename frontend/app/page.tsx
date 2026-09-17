@@ -1,6 +1,8 @@
 "use client";
+import React, { useState } from "react";
 import Link from "next/link";
 import MouseFollower from "./components/MouseFollower";
+import { motion } from "framer-motion";
 
 const INCIDENTS = [
   {
@@ -67,15 +69,37 @@ const FEATURES = [
 ];
 
 export default function HomePage() {
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+
   return (
     <main
       style={{
         minHeight: "100vh",
-        background: "radial-gradient(ellipse 70% 42% at 50% -12%, rgba(114,214,201,0.12) 0%, transparent 68%), var(--bg-primary)",
+        background: "var(--bg-primary)",
         position: "relative",
         overflow: "hidden",
       }}
     >
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          zIndex: 0,
+          opacity: 0.25,
+          mixBlendMode: "screen",
+        }}
+      >
+        <source src="/12352337-hd_1920_1080_60fps.mp4" type="video/mp4" />
+      </video>
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse 70% 42% at 50% -12%, rgba(114,214,201,0.12) 0%, transparent 68%)", zIndex: 0 }} />
+      <div style={{ position: "relative", zIndex: 1 }}>
       <MouseFollower />
       {/* ── NAV ── */}
       <nav
@@ -153,10 +177,14 @@ export default function HomePage() {
           margin: "0 auto",
           padding: "100px 32px 64px",
           textAlign: "center",
+          position: "relative",
+          zIndex: 10,
         }}
-        className="animate-slide-up"
       >
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -171,12 +199,16 @@ export default function HomePage() {
             fontWeight: 600,
             letterSpacing: "0.05em",
             textTransform: "uppercase",
+            backdropFilter: "blur(4px)",
           }}
         >
           SYSTEM BRIEF · CUSTOMER OPERATIONS
-        </div>
+        </motion.div>
 
-        <h1
+        <motion.h1
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.2 }}
           style={{
             fontSize: "clamp(42px, 7vw, 76px)",
             fontWeight: 900,
@@ -187,25 +219,35 @@ export default function HomePage() {
             WebkitBackgroundClip: "text",
             WebkitTextFillColor: "transparent",
             backgroundClip: "text",
+            textShadow: "0 4px 20px rgba(0,0,0,0.5)",
           }}
         >
           The Support System<br />That Investigates,<br />Not Just Answers
-        </h1>
+        </motion.h1>
 
-        <p
+        <motion.p
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.4 }}
           style={{
             fontSize: 18,
             color: "var(--text-secondary)",
             maxWidth: 620,
             margin: "0 auto 44px",
             lineHeight: 1.7,
+            textShadow: "0 2px 10px rgba(0,0,0,0.8)",
           }}
         >
           ArgusCX deploys a team of specialist AI agents that cross-reference order data, verify evidence photos forensically, and hand off complete case files — catching the exact fraud bots miss.
-        </p>
+        </motion.p>
 
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-          <Link href="/onboarding" className="btn-primary" style={{ fontSize: 15, padding: "13px 28px", background: 'linear-gradient(90deg, #00F0FF, #FF00E5)', border: 'none' }}>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 1, delay: 0.6 }}
+          style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}
+        >
+          <Link href="/onboarding" className="btn-primary" style={{ fontSize: 15, padding: "13px 28px", background: 'linear-gradient(90deg, #00F0FF, #FF00E5)', border: 'none', boxShadow: "0 0 20px rgba(255,0,229,0.4)" }}>
             Get Started (Verification)
           </Link>
           <Link href="/dashboard/chat" className="btn-primary" style={{ fontSize: 15, padding: "13px 28px" }}>
@@ -223,7 +265,67 @@ export default function HomePage() {
           >
             API documentation
           </a>
-        </div>
+        </motion.div>
+
+        {/* ── DEMO VIDEO ── */}
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1, delay: 0.8 }}
+          style={{
+            marginTop: 72,
+            position: "relative",
+            width: "100%",
+            maxWidth: 860,
+            margin: "72px auto 0",
+            aspectRatio: "16/9",
+            borderRadius: 24,
+            overflow: "hidden",
+            boxShadow: "0 25px 50px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.1)",
+            background: "rgba(15,23,42,0.8)",
+            cursor: isVideoPlaying ? "default" : "pointer",
+          }}
+          onClick={() => setIsVideoPlaying(true)}
+          whileHover={!isVideoPlaying ? { scale: 1.02, boxShadow: "0 30px 60px -12px rgba(14,165,233,0.4), 0 0 0 1px rgba(14,165,233,0.5)" } : {}}
+        >
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg, rgba(14,165,233,0.1), rgba(99,102,241,0.1))", zIndex: 1, pointerEvents: "none" }} />
+          
+          {!isVideoPlaying ? (
+            <div style={{ position: "relative", width: "100%", height: "100%", zIndex: 2 }}>
+              <img 
+                src="https://img.youtube.com/vi/pJU1c7IuVPE/maxresdefault.jpg" 
+                alt="ArgusCX Demo Thumbnail" 
+                style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.8 }}
+              />
+              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(15,23,42,0.9), rgba(15,23,42,0.2))", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", transition: "background 0.3s" }}>
+                <div style={{ 
+                  width: 80, height: 80, 
+                  background: "rgba(14,165,233,0.2)", 
+                  border: "2px solid rgba(14,165,233,0.8)", 
+                  borderRadius: "50%", 
+                  display: "flex", justifyContent: "center", alignItems: "center",
+                  backdropFilter: "blur(8px)",
+                  boxShadow: "0 0 30px rgba(14,165,233,0.5)",
+                }}>
+                  <div style={{ width: 0, height: 0, borderTop: "12px solid transparent", borderBottom: "12px solid transparent", borderLeft: "20px solid #fff", marginLeft: 6 }} />
+                </div>
+                <p style={{ marginTop: 24, fontSize: 18, fontWeight: 700, color: "#fff", textShadow: "0 2px 8px rgba(0,0,0,0.8)" }}>Watch the AI Agents in Action</p>
+                <p style={{ marginTop: 8, fontSize: 13, color: "var(--text-secondary)", textShadow: "0 2px 8px rgba(0,0,0,0.8)" }}>3-minute full investigation walkthrough</p>
+              </div>
+            </div>
+          ) : (
+            <iframe
+              width="100%"
+              height="100%"
+              src="https://www.youtube.com/embed/pJU1c7IuVPE?controls=1&rel=0&autoplay=1"
+              title="ArgusCX Product Demo"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              style={{ position: "relative", zIndex: 2, background: "#000" }}
+            ></iframe>
+          )}
+        </motion.div>
       </section>
 
       {/* ── INCIDENT TICKER ── */}
@@ -241,15 +343,24 @@ export default function HomePage() {
             gap: 16,
           }}
         >
-          {INCIDENTS.map((inc) => (
-            <div key={inc.event} className="glass-card" style={{ padding: "20px" }}>
+          {INCIDENTS.map((inc, i) => (
+            <motion.div
+              key={inc.event}
+              className="glass-card"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, margin: "-50px" }}
+              transition={{ delay: i * 0.1, duration: 0.5 }}
+              whileHover={{ y: -5, boxShadow: "0 10px 30px -10px rgba(14,165,233,0.3)", scale: 1.02 }}
+              style={{ padding: "20px" }}
+            >
               <div style={{ fontSize: 28, marginBottom: 10 }}>{inc.icon}</div>
               <span className={`badge ${inc.tagClass}`} style={{ marginBottom: 8 }}>{inc.tag}</span>
               <p style={{ fontWeight: 700, fontSize: 13, color: "var(--text-primary)", marginBottom: 6 }}>
                 {inc.event}
               </p>
               <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>{inc.desc}</p>
-            </div>
+            </motion.div>
           ))}
         </div>
       </section>
@@ -377,6 +488,7 @@ export default function HomePage() {
         <span style={{ color: "var(--accent)" }}>The Support System That Investigates, Not Just Answers</span>
         {" "}· After Argus, the many-eyed giant of Greek myth
       </footer>
+      </div>
     </main>
   );
 }

@@ -262,8 +262,8 @@ export default function ChatPage() {
     try {
       const uploaded = await Promise.all(files.map(uploadEvidence));
       setEvidenceFiles((prev) => [...prev, ...uploaded]);
-    } catch {
-      setError("File upload failed. Check backend is running.");
+    } catch (err) {
+      setError(`File upload failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setUploading(false);
     }
@@ -427,8 +427,8 @@ export default function ChatPage() {
                   try {
                     const uploaded = await Promise.all(files.map(uploadEvidence));
                     setEvidenceFiles((prev) => [...prev, ...uploaded]);
-                  } catch {
-                    setError("Upload failed");
+                  } catch (err) {
+                    setError(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
                   } finally { setUploading(false); }
                 }}
               >

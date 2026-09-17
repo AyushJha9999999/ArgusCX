@@ -35,15 +35,16 @@ class APIKeyRecord(BaseModel):
 # Global store
 _api_keys: Dict[str, APIKeyRecord] = {}
 
-# Pre-seed a master key for the dashboard
+# Pre-seed a master key and demo keys for dashboard/testing
 _MASTER_KEY = settings.ARGUSCX_MASTER_KEY
-_api_keys[_MASTER_KEY] = APIKeyRecord(
-    key_id="master",
-    key_prefix="acx_mast",
-    hashed_key=_MASTER_KEY,
-    company_name="ArgusCX Dashboard",
-    rate_limit_per_minute=1000,
-)
+for key in set([_MASTER_KEY, "acx_live_demo_key_2026", "acx_master_2026_hackathon"]):
+    _api_keys[key] = APIKeyRecord(
+        key_id=f"master_{key[:8]}",
+        key_prefix="acx_mast",
+        hashed_key=key,
+        company_name="ArgusCX Dashboard",
+        rate_limit_per_minute=1000,
+    )
 
 
 class CreateKeyRequest(BaseModel):

@@ -5,7 +5,7 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const API = `${API_BASE}/api/v1`;
-const ARGUSCX_KEY = process.env.NEXT_PUBLIC_ARGUSCX_KEY;
+const ARGUSCX_KEY = process.env.NEXT_PUBLIC_ARGUSCX_KEY ?? "acx_master_2026_hackathon";
 
 // ─────────────────────────────────────────────
 //  TYPES
