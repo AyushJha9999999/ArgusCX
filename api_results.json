@@ -1,0 +1,20 @@
+{
+  "SCENARIO_1_CLEAN": {
+    "Confidence": "84.3%",
+    "Risk Score": "3.2%",
+    "Fraud Score": "6.0%",
+    "Decision": "auto_resolve"
+  },
+  "SCENARIO_2_TAMPERED": {
+    "Confidence": "77.8%",
+    "Risk Score": "44.9%",
+    "Fraud Score": "50.6%",
+    "Decision": "escalate_to_human"
+  },
+  "SCENARIO_3_AI": {
+    "Confidence": "86.1%",
+    "Risk Score": "50.5%",
+    "Fraud Score": "79.7%",
+    "Decision": "fraud_reject"
+  }
+}
