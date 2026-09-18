@@ -106,3 +106,7 @@
 .btnApprove { background: #10B981; }
 .btnReject { background: #EF4444; }
 .btnEscalate { background: #F59E0B; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

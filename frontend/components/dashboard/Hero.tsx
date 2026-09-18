@@ -5,16 +5,17 @@ import Link from "next/link";
 export default function Hero() {
   return (
     <section 
+      className="dashboard-hero"
       style={{
         display: "grid",
         gridTemplateColumns: "1fr 1fr",
         gap: 24,
         marginBottom: 32,
-        height: 320,
+        minHeight: 320,
       }}
     >
       <div 
-        className="glass-card" 
+        className="glass-card glass-panel" 
         style={{ 
           padding: 40, 
           display: "flex", 
@@ -22,7 +23,7 @@ export default function Hero() {
           justifyContent: "center" 
         }}
       >
-        <h1 style={{ fontSize: 40, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 16px 0" }}>
+        <h1 className="hero-title" style={{ margin: "0 0 16px 0" }}>
           Return operations, <br/>backed by proof.
         </h1>
         <p style={{ fontSize: 16, color: "var(--text-secondary)", lineHeight: 1.6, maxWidth: 480, margin: "0 0 32px 0" }}>
@@ -63,7 +64,7 @@ export default function Hero() {
       </div>
       
       <div 
-        className="glass-card"
+        className="glass-card glass-panel"
         style={{
           position: "relative",
           overflow: "hidden",

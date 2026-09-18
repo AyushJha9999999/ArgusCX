@@ -21,9 +21,14 @@ class Base(DeclarativeBase):
 async def init_db():
     global engine, AsyncSessionLocal
 
+    if not settings.DATABASE_URL:
+        logger.info("PostgreSQL is not configured; relational persistence is disabled")
+        return
+
     try:
+        database_url = settings.DATABASE_URL.get_secret_value()
         engine = create_async_engine(
-            settings.DATABASE_URL,
+            database_url,
             pool_size=settings.DATABASE_POOL_SIZE,
             max_overflow=settings.DATABASE_MAX_OVERFLOW,
             echo=settings.APP_DEBUG,
@@ -37,10 +42,10 @@ async def init_db():
         # Verify connectivity
         async with engine.begin() as conn:
             await conn.run_sync(lambda c: c.execute(__import__("sqlalchemy").text("SELECT 1")))
-        logger.info("✅ PostgreSQL connected", url=settings.DATABASE_URL.split("@")[-1])
+        logger.info("✅ PostgreSQL connected", url=database_url.split("@")[-1])
     except Exception as exc:
         logger.warning(
-            "⚠️  PostgreSQL not reachable — running without DB (demo mode)",
+            "PostgreSQL not reachable; relational persistence is unavailable",
             error=str(exc),
         )
         engine = None

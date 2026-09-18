@@ -1,15 +1,53 @@
 "use client";
 
-const metrics = [
-  { label: "Active Sessions", value: "24", trend: "+12%", status: "neutral" },
-  { label: "Claims Analyzed (24h)", value: "1,492", trend: "+5%", status: "neutral" },
-  { label: "Requires Review", value: "8", trend: "-2", status: "warning" },
-  { label: "Evidence Anomalies", value: "3", trend: "0", status: "danger" },
+import { useEffect, useState } from "react";
+import { fetchApi } from "../../lib/api_cases";
+
+type AnalyticsSummary = {
+  total_tickets: number;
+  auto_resolved: number;
+  escalated: number;
+  fraud_flagged: number;
+};
+
+const emptyMetrics = [
+  { label: "Tickets analyzed", value: "--", trend: "Unavailable", status: "neutral" },
+  { label: "Auto-resolved", value: "--", trend: "Unavailable", status: "neutral" },
+  { label: "Requires review", value: "--", trend: "Unavailable", status: "warning" },
+  { label: "Fraud flagged", value: "--", trend: "Unavailable", status: "danger" },
 ];
 
 export default function OperationalMetrics() {
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const data = await fetchApi("/analytics/summary") as AnalyticsSummary;
+        if (active) setSummary(data);
+      } catch {
+        if (active) setUnavailable(true);
+      }
+    };
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, []);
+
+  const metrics = summary ? [
+    { label: "Tickets analyzed", value: summary.total_tickets.toLocaleString(), trend: "Live", status: "neutral" },
+    { label: "Auto-resolved", value: summary.auto_resolved.toLocaleString(), trend: "Live", status: "neutral" },
+    { label: "Requires review", value: summary.escalated.toLocaleString(), trend: "Live", status: "warning" },
+    { label: "Fraud flagged", value: summary.fraud_flagged.toLocaleString(), trend: "Live", status: "danger" },
+  ] : emptyMetrics;
+
   return (
-    <section 
+    <section aria-busy={!summary && !unavailable} aria-label="Operational metrics"
+      className="dashboard-metrics"
       style={{
         display: "grid",
         gridTemplateColumns: "repeat(4, 1fr)",
@@ -36,7 +74,7 @@ export default function OperationalMetrics() {
             <span style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
               {m.value}
             </span>
-            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-muted)" }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: unavailable ? "var(--warning)" : "var(--text-muted)" }}>
               {m.trend}
             </span>
           </div>

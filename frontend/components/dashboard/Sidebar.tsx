@@ -1,131 +1,47 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { Activity, BarChart3, BookOpen, Braces, Building2, ClipboardCheck, FileCheck2, FileText, Gauge, GitBranch, KeyRound, LayoutDashboard, Settings2, ShieldCheck, UserRound } from "lucide-react";
+import SignOutButton from "./SignOutButton";
 import SystemHealth from "./SystemHealth";
 
-const NAV_GROUPS = [
-  {
-    label: "Operations",
-    items: [
-      { href: "/dashboard", label: "Overview" },
-      { href: "/dashboard/sessions", label: "Live Sessions" },
-      { href: "/dashboard/cases", label: "Verification Cases" },
-      { href: "/dashboard/queue", label: "Review Queue" }
-    ]
-  },
-  {
-    label: "Intelligence",
-    items: [
-      { href: "/dashboard/analytics", label: "Analytics" },
-      { href: "/dashboard/fraud", label: "Fraud Graph" },
-      { href: "/dashboard/evidence", label: "Evidence Library" }
-    ]
-  },
-  {
-    label: "Platform",
-    items: [
-      { href: "/onboarding", label: "Integrations" },
-      { href: "/dashboard/api", label: "API Explorer" },
-      { href: "/dashboard/policies", label: "Policies" }
-    ]
-  },
-  {
-    label: "System",
-    items: [
-      { href: "/dashboard/audit", label: "Audit Log" },
-      { href: "/dashboard/settings", label: "Settings" }
-    ]
-  }
-];
+const groups = [
+  { label: "Workspace", items: [["/dashboard", "Overview", LayoutDashboard], ["/dashboard/profile", "Profile", UserRound], ["/dashboard/verify-new", "New verification", ClipboardCheck], ["/dashboard/sessions", "Sessions", Activity], ["/dashboard/cases", "Cases", FileCheck2], ["/dashboard/queue", "Review queue", Gauge]] },
+  { label: "Intelligence", items: [["/dashboard/analytics", "Analytics", BarChart3], ["/dashboard/company", "Company", Building2], ["/dashboard/fraud", "Relationships", GitBranch], ["/dashboard/evidence", "Evidence", FileText]] },
+  { label: "Platform", items: [["/getstarted", "Readiness plan", BookOpen], ["/dashboard/api", "API & credentials", KeyRound], ["/dashboard/policies", "Policies", ShieldCheck]] },
+  { label: "System", items: [["/dashboard/audit", "Audit log", Braces], ["/dashboard/settings", "Settings", Settings2]] },
+] as const;
 
 export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside
-      className="dashboard-sidebar hidden md:flex"
-      style={{
-        width: 248,
-        minWidth: 248,
-        backgroundColor: "var(--bg-secondary)",
-        borderRight: "1px solid var(--border)",
-        display: "none", /* We will control this via global css */
-        flexDirection: "column",
-        padding: "24px 16px",
-        zIndex: 50,
-      }}
-    >
-      {/* Brand & Environment */}
-      <div style={{ marginBottom: 32, paddingLeft: 12 }}>
-        <Link href="/" style={{ textDecoration: "none", color: "var(--text-primary)", display: "flex", gap: 12, alignItems: "center" }}>
-          <img src="/support_agent.jpg" alt="ArgusCX Avatar" style={{ width: 42, height: 42, borderRadius: 10, objectFit: "cover", border: "1px solid var(--border-strong)" }} />
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>
-              Argus<span style={{ color: "var(--accent)" }}>CX</span>
-            </div>
-            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2, fontWeight: 500 }}>
-              Return Intelligence Platform
-            </div>
-          </div>
+    <aside className="dashboard-sidebar premium-sidebar hidden md:flex" style={{ width: 248, minWidth: 248, backgroundColor: "var(--bg-secondary)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", padding: "20px 12px", zIndex: 50 }}>
+      <div style={{ marginBottom: 22, padding: "0 8px" }}>
+        <Link href="/" style={{ textDecoration: "none", color: "var(--text-primary)", display: "flex", gap: 10, alignItems: "center" }}>
+          <Image src="/ArgusCX.png" alt="ArgusCX" width={30} height={30} priority style={{ objectFit: "contain" }} />
+          <div><div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.03em" }}>ArgusCX</div><div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 1 }}>Operations workspace</div></div>
         </Link>
-        <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 16, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-          ACME COMMERCE · Production
-        </div>
       </div>
-
-      {/* Navigation */}
-      <nav style={{ flex: 1, display: "flex", flexDirection: "column", gap: 24, overflowY: "auto" }}>
-        {NAV_GROUPS.map((group) => (
+      <nav style={{ flex: 1, display: "grid", gap: 18, overflowY: "auto" }}>
+        {groups.map((group) => (
           <div key={group.label}>
-            <div style={{ 
-              fontSize: 11, 
-              fontWeight: 600, 
-              color: "var(--text-muted)", 
-              textTransform: "uppercase", 
-              letterSpacing: "0.06em",
-              marginBottom: 8,
-              paddingLeft: 12 
-            }}>
-              {group.label}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              {group.items.map((item) => {
-                const isActive = item.href === "/dashboard" 
-                  ? pathname === item.href 
-                  : pathname.startsWith(item.href);
-
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 6,
-                      fontSize: 13,
-                      fontWeight: 500,
-                      color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
-                      backgroundColor: isActive ? "var(--bg-hover)" : "transparent",
-                      textDecoration: "none",
-                      transition: "all 0.2s ease"
-                    }}
-                  >
-                    {item.label}
-                  </Link>
-                );
+            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6, paddingLeft: 10 }}>{group.label}</div>
+            <div style={{ display: "grid", gap: 1 }}>
+              {group.items.map(([href, label, Icon]) => {
+                const active = href === "/dashboard" ? pathname === href : pathname.startsWith(href);
+                return <Link key={href} href={href} className={`nav-item${active ? " active" : ""}`} style={{ padding: "8px 10px", borderRadius: 6, fontSize: 13, fontWeight: 500, color: active ? "var(--text-primary)" : "var(--text-secondary)", textDecoration: "none" }}><Icon size={15} strokeWidth={1.7} /><span>{label}</span></Link>;
               })}
             </div>
           </div>
         ))}
       </nav>
-
-      {/* Bottom Health & User */}
-      <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid var(--border)" }}>
+      <div style={{ marginTop: 18, padding: "18px 8px 0", borderTop: "1px solid var(--border)" }}>
         <SystemHealth />
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, paddingLeft: 8 }}>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--border-strong)" }} />
-          <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>jane@acme.co</div>
-        </div>
+        <Link href="/dashboard/profile" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", color: "var(--text-secondary)", fontSize: 12, marginTop: 14 }}><UserRound size={15} />Workspace profile</Link>
+        <SignOutButton compact />
       </div>
     </aside>
   );

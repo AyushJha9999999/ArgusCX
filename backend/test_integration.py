@@ -2,15 +2,16 @@ import httpx
 import time
 import json
 import uuid
+import os
 
-API_URL = "http://localhost:8000/api/v1"
-HEADERS = {
-    "X-ArgusCX-Key": "acx_master_2026_hackathon",
-    "Content-Type": "application/json"
-}
+API_URL = os.environ.get("ARGUSCX_API_URL", "").rstrip("/")
+API_KEY = os.environ.get("ARGUSCX_API_KEY", "")
+HEADERS = {"Content-Type": "application/json", **({"X-ArgusCX-Key": API_KEY} if API_KEY else {})}
 
 def run_test():
     print("=== ArgusCX Integration Test ===")
+    if not API_URL or not API_KEY:
+        raise RuntimeError("Set ARGUSCX_API_URL and ARGUSCX_API_KEY before running this integration test.")
     
     # 1. Create a verification session
     print("\n1. Creating verification session...")

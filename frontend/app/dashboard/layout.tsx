@@ -1,10 +1,21 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Sidebar from "../../components/dashboard/Sidebar";
 import Topbar from "../../components/dashboard/Topbar";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Check if user is authenticated via local storage
+    const token = localStorage.getItem("arguscx_dashboard_token");
+    if (!token) {
+      router.push("/login");
+    }
+  }, [router]);
+
   return (
     <div 
       className="premium-shell" 
@@ -32,10 +43,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         
         {/* Page content */}
         <main 
+          className="dashboard-main"
           style={{ 
             flex: 1, 
             padding: "32px",
-            maxWidth: "1600px", // Optional cap for ultrawide
+            maxWidth: "1600px",
             margin: "0 auto",
             width: "100%"
           }}

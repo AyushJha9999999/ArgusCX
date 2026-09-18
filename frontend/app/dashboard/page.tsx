@@ -21,13 +21,13 @@ export default function DashboardOverview() {
       <GettingStarted />
 
       {/* 4. Live Verification & Pipeline */}
-      <div style={{ display: "flex", gap: 24 }}>
+      <div className="dashboard-split">
         <LiveVerificationMonitor />
         <EvidencePipeline />
       </div>
 
       {/* 5. Intelligence / Graph & Anomalies */}
-      <div style={{ display: "flex", gap: 24 }}>
+      <div className="dashboard-split">
         <FraudGraph />
         <EvidenceAnomalies />
       </div>

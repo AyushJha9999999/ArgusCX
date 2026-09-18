@@ -1,11 +1,10 @@
-"""
-ArgusCX — Policy Engine (Shared Services)
-Uses Groq LLM to dynamically determine applicable policies and permitted actions.
-"""
+"""Policy evaluation that fails closed when policies or reasoning are absent."""
+import json
 from typing import List, Optional
-from pydantic import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate
+
 import structlog
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 
 from app.core.llm import get_llm
 from app.services.prompt_manager import get_system_prompt
@@ -14,11 +13,21 @@ logger = structlog.get_logger(__name__)
 
 
 class PolicyResult(BaseModel):
-    applicable_policies: List[str] = Field(description="List of policy names that apply")
-    permitted_actions: List[str] = Field(description="Actions allowed under these policies")
-    constraints: List[str] = Field(default_factory=list, description="Constraints on permitted actions")
-    auto_resolve_eligible: bool = Field(description="Whether ticket can be auto-resolved")
-    reasoning: str = Field(description="Why these policies apply")
+    applicable_policies: List[str]
+    permitted_actions: List[str]
+    constraints: List[str] = Field(default_factory=list)
+    auto_resolve_eligible: bool
+    reasoning: str
+
+
+def _review_only(reason: str) -> PolicyResult:
+    return PolicyResult(
+        applicable_policies=[],
+        permitted_actions=["escalate"],
+        constraints=[reason],
+        auto_resolve_eligible=False,
+        reasoning="No automated policy decision was issued.",
+    )
 
 
 async def evaluate_policies(
@@ -26,61 +35,31 @@ async def evaluate_policies(
     message: str,
     retrieved_policies: List[str],
     fraud_score: float = 0.0,
-    order_data: dict = None,
+    order_data: Optional[dict] = None,
 ) -> PolicyResult:
-    """
-    Use Groq LLM to evaluate which business policies apply to this ticket
-    and determine what actions are permitted.
-    """
+    if not retrieved_policies:
+        return _review_only("No organisation policy has been ingested for this case type.")
     llm = get_llm(temperature=0.0)
     if not llm:
-        logger.warning("No LLM configured for policy engine")
-        return PolicyResult(
-            applicable_policies=["Default Support Policy"],
-            permitted_actions=["escalate"],
-            constraints=["LLM not available — escalating to human"],
-            auto_resolve_eligible=False,
-            reasoning="Policy engine unavailable — defaulting to human escalation.",
-        )
+        return _review_only("AI policy reasoning is not configured.")
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", get_system_prompt("policy_engine")),
-        ("user", """Ticket Category: {category}
-Customer Message: {message}
-
-Retrieved Knowledge Base Policies:
-{policies}
-
-Fraud Risk Score: {fraud_score}
-Order Data: {order_data}
-"""),
+        ("system", get_system_prompt("policy_engine") + "\nNever permit automatic action when the supplied policies do not explicitly allow it."),
+        ("user", """Ticket category: {category}
+Customer message: {message}
+Organisation policies: {policies}
+Fraud score: {fraud_score}
+Order data: {order_data}"""),
     ])
-
-    structured_llm = llm.with_structured_output(PolicyResult)
-    chain = prompt | structured_llm
-
     try:
-        import json
-        result: PolicyResult = await chain.ainvoke({
+        result: PolicyResult = await (prompt | llm.with_structured_output(PolicyResult)).ainvoke({
             "category": category or "general",
             "message": message,
-            "policies": "\n".join(retrieved_policies) if retrieved_policies else "No policies retrieved.",
+            "policies": "\n".join(retrieved_policies),
             "fraud_score": fraud_score,
-            "order_data": json.dumps(order_data) if order_data else "No order data.",
+            "order_data": json.dumps(order_data, default=str),
         })
-        logger.info(
-            "Policy evaluation complete",
-            policies=result.applicable_policies,
-            actions=result.permitted_actions,
-            auto_resolve=result.auto_resolve_eligible,
-        )
         return result
-    except Exception as e:
-        logger.error("Policy engine failed", error=str(e))
-        return PolicyResult(
-            applicable_policies=["Default Support Policy"],
-            permitted_actions=["escalate"],
-            constraints=[f"Policy engine error: {str(e)[:60]}"],
-            auto_resolve_eligible=False,
-            reasoning="Policy engine error — defaulting to human escalation.",
-        )
+    except Exception as exc:
+        logger.error("Policy reasoning failed", error=str(exc))
+        return _review_only("AI policy reasoning did not complete.")

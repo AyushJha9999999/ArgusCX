@@ -1,47 +1,47 @@
 "use client";
 
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { GitBranch, Link2 } from "lucide-react";
+import { getCases, type VerificationCase } from "../../lib/api_cases";
+
+const compactId = (value?: string) => value ? `${value.slice(0, 7)}…${value.slice(-5)}` : "Unassigned";
+
 export default function FraudGraph() {
-  return (
-    <section className="glass-card" style={{ padding: 24, flex: 2, display: "flex", flexDirection: "column" }}>
-      <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 20px 0", color: "var(--text-primary)" }}>
-        Identity & Fraud Graph
-      </h2>
-      <div style={{ 
-        flex: 1, 
-        background: "var(--bg-elevated)", 
-        borderRadius: 6, 
-        border: "1px solid var(--border)",
-        position: "relative",
-        overflow: "hidden",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center"
-      }}>
-        {/* Placeholder for SVG Network Graph */}
-        <svg width="100%" height="100%" viewBox="0 0 400 200" style={{ opacity: 0.8 }}>
-          {/* Edges */}
-          <line x1="200" y1="100" x2="100" y2="60" stroke="var(--danger)" strokeWidth="2" strokeDasharray="4 4" />
-          <line x1="200" y1="100" x2="300" y2="60" stroke="var(--border-strong)" strokeWidth="2" />
-          <line x1="200" y1="100" x2="200" y2="160" stroke="var(--border-strong)" strokeWidth="2" />
-          
-          {/* Nodes */}
-          {/* Center: Evidence */}
-          <circle cx="200" cy="100" r="16" fill="var(--bg-surface)" stroke="var(--accent)" strokeWidth="2" />
-          <text x="200" y="130" fill="var(--text-secondary)" fontSize="10" textAnchor="middle" fontFamily="var(--font-mono)">EVD-88321</text>
-          
-          {/* Left: Previous Claim (Collision) */}
-          <circle cx="100" cy="60" r="12" fill="var(--danger)" />
-          <text x="100" y="85" fill="var(--text-secondary)" fontSize="10" textAnchor="middle" fontFamily="var(--font-mono)">CAS_88321</text>
-          
-          {/* Right: Current Session */}
-          <circle cx="300" cy="60" r="12" fill="var(--info)" />
-          <text x="300" y="85" fill="var(--text-secondary)" fontSize="10" textAnchor="middle" fontFamily="var(--font-mono)">SES_05_DUP</text>
-          
-          {/* Bottom: Device */}
-          <circle cx="200" cy="160" r="12" fill="var(--bg-surface)" stroke="var(--text-muted)" strokeWidth="2" />
-          <text x="200" y="185" fill="var(--text-secondary)" fontSize="10" textAnchor="middle" fontFamily="var(--font-mono)">IP-192.168</text>
+  const [cases, setCases] = useState<VerificationCase[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    void getCases().then((data) => { if (active) setCases(data.cases); }).catch(() => { if (active) setCases([]); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const visibleCases = useMemo(() => cases.slice(0, 5), [cases]);
+
+  return <section className="glass-card relationship-graph">
+    <div className="relationship-heading"><div><h2>Investigation relationships</h2><p>Live links between a verification session and its case record.</p></div><span><GitBranch size={15} />{visibleCases.length} live links</span></div>
+    {loading ? <div className="relationship-empty"><div className="spinner" />Loading live relationships</div> : !visibleCases.length ? <div className="relationship-empty"><Link2 size={18} />No recorded session-to-case links yet.</div> : <>
+      <div className="relationship-canvas" role="img" aria-label={`${visibleCases.length} live relationships between verification sessions and cases`}>
+        <svg viewBox={`0 0 680 ${Math.max(210, visibleCases.length * 58 + 52)}`} preserveAspectRatio="xMidYMid meet">
+          {visibleCases.map((item, index) => {
+            const y = 46 + index * 58;
+            const risk = typeof item.risk_score === "number" ? `${Math.round(item.risk_score * 100)}% risk` : item.state;
+            return <g key={item.id}>
+              <line x1="203" x2="465" y1={y} y2={y} stroke="var(--border-strong)" strokeWidth="1" />
+              <circle cx="334" cy={y} r="4" fill="var(--bg-primary)" stroke="var(--accent)" strokeWidth="1.5" />
+              <rect x="18" y={y - 19} width="185" height="38" rx="5" fill="var(--bg-elevated)" stroke="var(--border)" />
+              <text x="31" y={y - 3} fill="var(--text-secondary)" fontSize="10" fontFamily="var(--font-mono)">SESSION</text>
+              <text x="31" y={y + 11} fill="var(--text-primary)" fontSize="12" fontFamily="var(--font-mono)">{compactId(item.session_id)}</text>
+              <text x="334" y={y - 10} textAnchor="middle" fill="var(--text-muted)" fontSize="9" fontFamily="var(--font-mono)">{risk}</text>
+              <rect x="465" y={y - 19} width="197" height="38" rx="5" fill="var(--bg-elevated)" stroke="var(--border)" />
+              <text x="478" y={y - 3} fill="var(--text-secondary)" fontSize="10" fontFamily="var(--font-mono)">CASE</text>
+              <text x="478" y={y + 11} fill="var(--text-primary)" fontSize="12" fontFamily="var(--font-mono)">{compactId(item.id)}</text>
+            </g>;
+          })}
         </svg>
       </div>
-    </section>
-  );
+      <div className="relationship-list">{visibleCases.map((item) => <Link key={item.id} href={`/dashboard/cases/${encodeURIComponent(item.id)}`}><span>{compactId(item.session_id)}</span><i /><strong>{compactId(item.id)}</strong><small>{item.category ? item.category.replace(/_/g, " ") : item.state}</small></Link>)}</div>
+    </>}
+  </section>;
 }

@@ -1,7 +1,7 @@
 """
 ArgusCX — Information Retrieval Agent
 Searches policies, FAQs, and past tickets using real semantic RAG (sentence-transformers).
-No mock data — all retrieval goes through the embedding vector store.
+Organisation-owned knowledge is retrieved through the embedding vector store.
 """
 from typing import Any, Dict
 import structlog
@@ -42,7 +42,7 @@ async def run_retrieval_agent(state: AgentState) -> Dict[str, Any]:
             "policies": policies,
             "faqs": faqs,
             "past_tickets": past_tickets,
-            "confidence": min(0.95, max(policy_results.scores[0], 0.5)) if policy_results.scores else 0.5,
+            "confidence": min(0.95, max(policy_results.scores[0], 0.0)) if policy_results.scores else 0.0,
             "reasoning": (
                 f"Retrieved {len(policies)} policies (top score: {policy_results.scores[0]:.3f}), "
                 f"{len(faqs)} FAQs, {len(past_tickets)} similar past tickets "
@@ -55,7 +55,7 @@ async def run_retrieval_agent(state: AgentState) -> Dict[str, Any]:
             "policies": [],
             "faqs": [],
             "past_tickets": [],
-            "confidence": 0.3,
-            "reasoning": f"Retrieval failed: {str(e)[:80]}",
-            "error": str(e),
+            "confidence": 0.0,
+            "reasoning": "Knowledge retrieval did not complete.",
+            "error": "retrieval_unavailable",
         }

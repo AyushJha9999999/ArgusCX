@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel, Field
 import structlog
 
+from app.core.config import settings
 from app.services.challenge_generator import (
     generate_session_nonce,
     generate_challenge_sequence,
@@ -27,13 +28,14 @@ from app.services.challenge_generator import (
 )
 
 logger = structlog.get_logger(__name__)
+
 router = APIRouter(prefix="/sessions")
 
 SESSION_TTL_MINUTES = 30
 
-# ---- In-memory store (upgrade to DB when PostgreSQL connected) ----
-_sessions: Dict[str, dict] = {}
-_cases: Dict[str, dict] = {}
+# Process-local operational store. The PostgreSQL models are the production
+# persistence contract; this store keeps a local development process usable.
+from app.db.mongodb import get_sessions_col, get_cases_col
 
 
 # ──────────────────────────────────────────────
@@ -51,7 +53,7 @@ class SessionCreateRequest(BaseModel):
     challenge_count: int = Field(DEFAULT_CHALLENGE_COUNT, ge=3, le=10)
     require_serial_challenge: bool = True
     require_packaging_challenge: bool = False
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ChallengeInfo(BaseModel):
@@ -82,6 +84,7 @@ class SessionStatusResponse(BaseModel):
     created_at: str
     expires_at: str
     completed_at: Optional[str]
+    challenges: List[ChallengeInfo] = []
 
 
 class SessionCompleteRequest(BaseModel):
@@ -101,8 +104,9 @@ def _generate_session_token(session_id: str) -> str:
     return f"ses_tok_{secrets.token_hex(24)}"
 
 
-def _build_capture_url(session_id: str, base_url: str = "http://localhost:3000") -> str:
-    return f"{base_url}/verify/{session_id}"
+def _build_capture_url(session_id: str, session_token: str, base_url: str) -> str:
+    """Return the customer capture link with its scoped session credential."""
+    return f"{base_url}/verify/{session_id}?token={session_token}"
 
 
 def _generate_qr_b64(url: str) -> str:
@@ -125,6 +129,10 @@ def _generate_qr_b64(url: str) -> str:
 @router.post("", response_model=SessionCreateResponse, status_code=201)
 async def create_session(req: SessionCreateRequest, request: Request):
     """Create a verification session and return the capture URL + QR code."""
+    identity = getattr(request.state, "key_id", None) or getattr(request.state, "authenticated_user", {})
+    tenant_id = identity if isinstance(identity, str) else identity.get("sub")
+    if not tenant_id:
+        raise HTTPException(status_code=401, detail="An authenticated platform or dashboard identity is required.")
     nonce = generate_session_nonce()
     session_id = f"ses_{secrets.token_hex(10)}"
     session_token = _generate_session_token(session_id)
@@ -138,8 +146,8 @@ async def create_session(req: SessionCreateRequest, request: Request):
     )
 
     # Determine base URL from request
-    base = str(request.base_url).rstrip("/").replace(":8000", ":3000")
-    capture_url = _build_capture_url(session_id, base)
+    base = settings.DASHBOARD_BASE_URL or str(request.base_url).rstrip("/")
+    capture_url = _build_capture_url(session_id, session_token, base)
 
     session = {
         "id": session_id,
@@ -162,8 +170,12 @@ async def create_session(req: SessionCreateRequest, request: Request):
         "created_at": datetime.utcnow().isoformat(),
         "completed_at": None,
         "metadata": req.metadata,
+        "tenant_id": tenant_id,
     }
-    _sessions[session_id] = session
+    
+    sessions_col = get_sessions_col()
+    if sessions_col is not None:
+        await sessions_col.insert_one(session)
 
     logger.info("Session created", session_id=session_id, order_id=req.order_id)
 
@@ -179,10 +191,47 @@ async def create_session(req: SessionCreateRequest, request: Request):
     )
 
 
+@router.get("")
+async def list_sessions(
+    limit: int = 100,
+    offset: int = 0,
+):
+    """List recent verification sessions for the operator dashboard."""
+    bounded_limit = max(1, min(limit, 200))
+    sessions_col = get_sessions_col()
+    if sessions_col is None:
+        return {"total": 0, "sessions": [], "limit": bounded_limit, "offset": offset}
+        
+    total_count = await sessions_col.count_documents({})
+    cursor = sessions_col.find({}).sort("created_at", -1).skip(offset).limit(bounded_limit)
+    page = await cursor.to_list(length=bounded_limit)
+    
+    return {
+        "total": total_count,
+        "sessions": [
+            {
+                "session_id": session["id"],
+                "status": session["status"],
+                "order_id": session.get("order_id"),
+                "assurance_level": session["assurance_level"],
+                "challenges_total": len(session.get("challenge_sequence", [])),
+                "challenges_completed": session.get("challenges_completed", 0),
+                "created_at": session["created_at"],
+                "expires_at": session["expires_at"],
+                "completed_at": session.get("completed_at"),
+            }
+            for session in page
+        ],
+        "limit": bounded_limit,
+        "offset": offset,
+    }
+
+
 @router.get("/{session_id}", response_model=SessionStatusResponse)
 async def get_session(session_id: str):
     """Get session status."""
-    session = _sessions.get(session_id)
+    sessions_col = get_sessions_col()
+    session = await sessions_col.find_one({"id": session_id}) if sessions_col is not None else None
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return SessionStatusResponse(
@@ -195,13 +244,15 @@ async def get_session(session_id: str):
         created_at=session["created_at"],
         expires_at=session["expires_at"],
         completed_at=session.get("completed_at"),
+        challenges=[ChallengeInfo(**challenge) for challenge in session.get("challenge_sequence", [])],
     )
 
 
 @router.get("/{session_id}/result")
 async def get_session_result(session_id: str):
     """Get the full case report for a completed session."""
-    session = _sessions.get(session_id)
+    sessions_col = get_sessions_col()
+    session = await sessions_col.find_one({"id": session_id}) if sessions_col is not None else None
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session["status"] not in ("completed", "analysed"):
@@ -209,7 +260,8 @@ async def get_session_result(session_id: str):
             status_code=202,
             detail={"message": "Analysis in progress", "status": session["status"]}
         )
-    case = _cases.get(session_id)
+    cases_col = get_cases_col()
+    case = await cases_col.find_one({"session_id": session_id}) if cases_col is not None else None
     return {
         "session_id": session_id,
         "status": session["status"],
@@ -229,7 +281,8 @@ async def complete_session(
     Called by the capture UI when all challenges are done.
     Triggers async analysis pipeline.
     """
-    session = _sessions.get(session_id)
+    sessions_col = get_sessions_col()
+    session = await sessions_col.find_one({"id": session_id}) if sessions_col is not None else None
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     if session["status"] not in ("pending", "in_progress"):
@@ -245,6 +298,16 @@ async def complete_session(
     session["evidence_ids"] = req.evidence_ids
     session["completed_at"] = datetime.utcnow().isoformat()
 
+    await sessions_col.update_one(
+        {"id": session_id},
+        {"$set": {
+            "status": "analysing",
+            "assurance_level": req.assurance_level,
+            "evidence_ids": req.evidence_ids,
+            "completed_at": session["completed_at"]
+        }}
+    )
+
     # Trigger async analysis
     background_tasks.add_task(_run_analysis_pipeline, session_id)
 
@@ -254,21 +317,27 @@ async def complete_session(
 @router.post("/{session_id}/outbound-evidence")
 async def upload_outbound_evidence(session_id: str, req: OutboundEvidenceRequest):
     """Merchant uploads warehouse/outbound photos for comparison."""
-    session = _sessions.get(session_id)
+    sessions_col = get_sessions_col()
+    session = await sessions_col.find_one({"id": session_id}) if sessions_col is not None else None
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    session["outbound_evidence_urls"] = req.urls
+        
+    await sessions_col.update_one(
+        {"id": session_id},
+        {"$set": {"outbound_evidence_urls": req.urls}}
+    )
     return {"message": "Outbound evidence recorded", "count": len(req.urls)}
 
 
 @router.get("/{session_id}/qr")
 async def get_session_qr(session_id: str, request: Request):
     """Return a QR code image (base64 PNG) linking to the capture URL."""
-    session = _sessions.get(session_id)
+    sessions_col = get_sessions_col()
+    session = await sessions_col.find_one({"id": session_id}) if sessions_col is not None else None
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    base = str(request.base_url).rstrip("/").replace(":8000", ":3000")
-    capture_url = _build_capture_url(session_id, base)
+    base = settings.DASHBOARD_BASE_URL or str(request.base_url).rstrip("/")
+    capture_url = _build_capture_url(session_id, session["session_token"], base)
     qr_b64 = _generate_qr_b64(capture_url)
     return {
         "session_id": session_id,
@@ -278,16 +347,18 @@ async def get_session_qr(session_id: str, request: Request):
 
 
 # ──────────────────────────────────────────────
-#  ANALYSIS PIPELINE (stub -- workers plug in here)
+#  ANALYSIS PIPELINE
 # ──────────────────────────────────────────────
 
 async def _run_analysis_pipeline(session_id: str):
     """
     Orchestrate the full analysis pipeline for a session.
-    In production: Celery chord/group coordinates parallel workers.
-    For demo: runs sequentially in background task.
+    The local runtime executes the configured analysis stages sequentially.
+    A non-assessed evidence set is always routed to human review.
     """
-    session = _sessions.get(session_id)
+    sessions_col = get_sessions_col()
+    cases_col = get_cases_col()
+    session = await sessions_col.find_one({"id": session_id}) if sessions_col is not None else None
     if not session:
         return
 
@@ -299,7 +370,8 @@ async def _run_analysis_pipeline(session_id: str):
         )
         from app.services.manifest_service import build_manifest
 
-        # === Stub signal data (workers fill real data in production) ===
+        # Evidence workers populate these collections when their output is
+        # available. Empty values mean "not assessed", never "passed".
         forensic_findings = []
         screen_replay_findings = []
         challenge_completion_ratio = (
@@ -327,10 +399,14 @@ async def _run_analysis_pipeline(session_id: str):
         )
 
         state, routing, reasoning_prefix = determine_case_state(signals, session.get("policy_json", {}))
+        if not session.get("evidence_ids"):
+            state = "REVIEW_REQUIRED"
+            routing = "REVIEW_REQUIRED"
+            reasoning_prefix = "No evidence was submitted; operator review is required."
 
         case = build_case(
             session_id=session_id,
-            tenant_id="demo_tenant",
+            tenant_id=session["tenant_id"],
             signals=signals,
             state=state,
             routing=routing,
@@ -340,26 +416,32 @@ async def _run_analysis_pipeline(session_id: str):
             contradictions=[],
         )
         case["id"] = f"cas_{secrets.token_hex(8)}"
-        _cases[session_id] = case
+        await cases_col.insert_one(case)
 
         # Build manifest
         evidence_hashes = session.get("evidence_ids", [])
         manifest = build_manifest(session_id, evidence_hashes, {"signals": signals})
         case["manifest_hash"] = manifest["manifest_hash"]
 
-        session["status"] = "completed"
+        await sessions_col.update_one(
+            {"id": session_id},
+            {"$set": {"status": "completed"}}
+        )
         logger.info("Analysis complete", session_id=session_id, state=state, routing=routing)
 
     except Exception as exc:
         logger.error("Analysis pipeline failed", session_id=session_id, error=str(exc))
-        session["status"] = "completed"
-        _cases[session_id] = {
+        await sessions_col.update_one(
+            {"id": session_id},
+            {"$set": {"status": "review_required"}}
+        )
+        await cases_col.insert_one({
             "id": f"cas_{secrets.token_hex(8)}",
             "session_id": session_id,
             "state": "REVIEW_REQUIRED",
             "routing": "REVIEW_REQUIRED",
             "risk_signals_json": {},
-            "reasoning_narrative": f"Analysis pipeline error: {exc}",
+            "reasoning_narrative": "Analysis could not complete; operator review is required.",
             "claim_assertions_json": [],
             "contradictions_json": [],
-        }
+        })

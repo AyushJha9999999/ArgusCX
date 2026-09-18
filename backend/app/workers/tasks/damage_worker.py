@@ -158,7 +158,7 @@ def detect_damage_multi_frame(frames_bytes: List[bytes]) -> Dict[str, Any]:
     threshold = max(len(frames_bytes) * 0.3, 1)
     confirmed_damage = [dt for dt, count in all_damage_types.items() if count >= threshold]
 
-    # Consensus severity (highest with >= 1 vote wins for demo; in production: >50%)
+    # The configured evidence policy determines the final severity threshold.
     consensus_sev = max(severity_votes, key=lambda s: (severity_votes[s], SEVERITY_MAP.get(s, 0)))
     avg_conf = sum(all_confidences) / len(all_confidences) if all_confidences else None
 

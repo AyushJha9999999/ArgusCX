@@ -93,11 +93,5 @@ CREATE INDEX IF NOT EXISTS idx_evidence_ticket   ON evidence(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_ticket ON agent_runs(ticket_id);
 
 -- Seed a default admin user (password: admin123 — CHANGE THIS)
-INSERT INTO users (email, full_name, role, hashed_pw)
-VALUES (
-    'admin@arguscx.ai',
-    'ArgusCX Admin',
-    'admin',
-    crypt('admin123', gen_salt('bf'))
-)
-ON CONFLICT (email) DO NOTHING;
+-- Dashboard access is configured through ADMIN_EMAIL and ADMIN_PASSWORD.
+-- Do not seed a default administrator or a password in schema migrations.

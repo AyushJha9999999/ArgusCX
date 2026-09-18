@@ -11,7 +11,6 @@ All three scores are independently computed then blended — they are NEVER iden
 """
 import math
 import re
-import random
 from typing import Any, Dict, List, Optional
 
 import structlog
@@ -111,15 +110,15 @@ def _extract_signals(state: AgentState) -> Dict[str, Any]:
         None,
     )
     anomaly_count = 0
-    claim_verified = True
+    claim_verified = False
     risk_indicator_count = 0
-    investigation_confidence = 0.75
+    investigation_confidence = 0.0
 
     if inv_step and inv_step.output_data:
         anomaly_count = len(inv_step.output_data.get("anomalies", []))
-        claim_verified = inv_step.output_data.get("claim_verified", True)
+        claim_verified = inv_step.output_data.get("claim_verified", False)
         risk_indicator_count = len(inv_step.output_data.get("risk_indicators", []))
-        investigation_confidence = inv_step.output_data.get("confidence", 0.75)
+        investigation_confidence = inv_step.output_data.get("confidence", 0.0)
 
     return {
         # Behavioural
@@ -161,7 +160,7 @@ def _compute_fraud_score(s: Dict[str, Any]) -> float:
         score += s["evidence_ai_prob"] * 0.15
     else:
         # No evidence — penalise slightly for unsubstantiated claims
-        score += 0.04
+        score += 0.0
 
     # Prior fraud history (weight 0.25)
     flag_score = min(1.0, s["fraud_flags"] / 3.0)  # 3+ flags → max
@@ -190,8 +189,6 @@ def _compute_fraud_score(s: Dict[str, Any]) -> float:
         score += 0.05
 
     # Add a small realistic jitter (±2%) to avoid identical scores
-    score += random.uniform(-0.02, 0.02)
-
     return score
 
 
@@ -230,8 +227,6 @@ def _compute_risk_score(s: Dict[str, Any], fraud_score: float) -> float:
         score += 0.04
 
     # Add small jitter independent of fraud jitter
-    score += random.uniform(-0.015, 0.015)
-
     return score
 
 
@@ -255,7 +250,7 @@ def _compute_confidence_score(
         if s["c2pa_valid"] is True:
             base = min(1.0, base + 0.05)
     else:
-        base = max(0.40, base - 0.08)  # Less confident without files
+        base = max(0.0, base - 0.08)  # Less confident without files
 
     # Consistent signals → higher confidence
     if s["fraud_flags"] > 1 and fraud_score > 0.70:
@@ -276,6 +271,4 @@ def _compute_confidence_score(
         base = min(1.0, base + 0.04)
 
     # Add small jitter
-    base += random.uniform(-0.01, 0.01)
-
-    return max(0.40, base)
+    return max(0.0, base)

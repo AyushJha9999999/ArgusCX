@@ -511,10 +511,10 @@ export default function ChatPage() {
             />
           </div>
 
-          {/* Scenario guide */}
+          {/* Investigation requirements */}
           <div className="glass-card" style={{ padding: "16px 20px", marginTop: 12 }}>
             <h3 style={{ fontWeight: 700, fontSize: 12, marginBottom: 10, color: "var(--text-muted)" }}>
-              DEMO SCENARIOS
+              LIVE INVESTIGATION REQUIREMENTS
             </h3>
             {[
               { flags: 0, label: "Genuine damage", outcome: "Auto-resolved", color: "var(--success)" },

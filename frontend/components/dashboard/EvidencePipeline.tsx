@@ -1,68 +1,22 @@
 "use client";
 
-const stages = [
-  { name: "Capture", status: "done", time: "124ms" },
-  { name: "Liveness", status: "done", time: "89ms" },
-  { name: "Identity", status: "processing", time: "..." },
-  { name: "Forensics", status: "pending", time: "-" },
-  { name: "Timeline", status: "pending", time: "-" },
-  { name: "Risk", status: "pending", time: "-" }
-];
+import { useEffect, useState } from "react";
+import { getSessions, type VerificationSession } from "../../lib/api_cases";
+
+const STAGES = ["Session created", "Customer capture", "Evidence analysis", "Operator decision"];
 
 export default function EvidencePipeline() {
-  return (
-    <section className="glass-card" style={{ padding: 24, width: 320, display: "flex", flexDirection: "column" }}>
-      <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 24px 0", color: "var(--text-primary)" }}>
-        Evidence Pipeline
-      </h2>
-      
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, flex: 1 }}>
-        {stages.map((stage, i) => (
-          <div key={i} style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {/* Node */}
-            <div style={{ position: "relative" }}>
-              <div style={{ 
-                width: 16, 
-                height: 16, 
-                borderRadius: "50%", 
-                background: stage.status === "done" ? "var(--success)" : stage.status === "processing" ? "var(--warning)" : "var(--bg-surface)",
-                border: stage.status === "pending" ? "1px solid var(--border-strong)" : "none",
-                zIndex: 2,
-                position: "relative"
-              }} />
-              {i < stages.length - 1 && (
-                <div style={{ 
-                  position: "absolute", 
-                  top: 16, 
-                  left: 7, 
-                  width: 2, 
-                  height: 24, 
-                  background: stage.status === "done" ? "var(--success)" : "var(--border)",
-                  opacity: 0.5
-                }} />
-              )}
-            </div>
-            
-            {/* Content */}
-            <div style={{ display: "flex", flex: 1, justifyContent: "space-between", alignItems: "center", transform: "translateY(-2px)" }}>
-              <span style={{ 
-                fontSize: 13, 
-                fontWeight: 500, 
-                color: stage.status === "pending" ? "var(--text-muted)" : "var(--text-primary)"
-              }}>
-                {stage.name}
-              </span>
-              <span style={{ 
-                fontSize: 11, 
-                fontFamily: "var(--font-mono)", 
-                color: "var(--text-secondary)"
-              }}>
-                {stage.time}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
+  const [session, setSession] = useState<VerificationSession | null>(null);
+  useEffect(() => { void getSessions(1).then((data) => setSession(data.sessions[0] ?? null)).catch(() => setSession(null)); }, []);
+  const current = session?.status ?? "awaiting_session";
+  const completed = current === "completed" || current === "analysed";
+  const activeIndex = current === "awaiting_session" ? -1 : completed ? 3 : current === "analysing" ? 2 : 1;
+  return <section className="glass-card" style={{ padding: 24, width: 320, display: "flex", flexDirection: "column" }}>
+    <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 16px" }}>Evidence pipeline</h2>
+    <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 20px" }}>{session ? `Latest session: ${session.session_id}` : "Create a verification session to start the pipeline."}</p>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>{STAGES.map((stage, index) => <div key={stage} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      <span style={{ width: 11, height: 11, borderRadius: "50%", background: index < activeIndex ? "var(--success)" : index === activeIndex ? "var(--accent)" : "var(--border-strong)" }} />
+      <span style={{ color: index <= activeIndex ? "var(--text-primary)" : "var(--text-muted)", fontSize: 13 }}>{stage}</span>
+    </div>)}</div>
+  </section>;
 }

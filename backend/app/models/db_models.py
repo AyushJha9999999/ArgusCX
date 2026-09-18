@@ -36,6 +36,31 @@ class Tenant(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     sessions = relationship("VerificationSession", back_populates="tenant")
+    api_keys = relationship("ApiKey", back_populates="tenant", cascade="all, delete-orphan")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    client_id = Column(String(80), nullable=False, unique=True, index=True)
+    key_prefix = Column(String(32), nullable=False)
+    secret_hash = Column(String(255), nullable=False)
+    company_name = Column(String(255), nullable=False)
+    rate_limit_per_minute = Column(Integer, default=60, nullable=False)
+    usage_count = Column(Integer, default=0, nullable=False)
+    last_used = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    tenant = relationship("Tenant", back_populates="api_keys")
+
+    __table_args__ = (
+        Index("ix_api_keys_tenant_id", "tenant_id"),
+        Index("ix_api_keys_prefix", "key_prefix"),
+    )
 
 
 # ─────────────────────────────────────────

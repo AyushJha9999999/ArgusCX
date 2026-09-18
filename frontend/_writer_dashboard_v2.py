@@ -229,7 +229,7 @@ export default function Onboarding() {
               marginBottom: 32
             }}>
               ARGUSCX_API_KEY: <br/><br/>
-              acx_master_2026_hackathon
+              Generated securely in the API control plane
             </div>
             
             <p style={{ fontSize: 13, color: 'var(--accent-magenta)', marginBottom: 24 }}>
@@ -258,8 +258,7 @@ export default function Onboarding() {
     # lib/api_cases.ts (Live data connector)
     # ---------------------------------------------------------
     write_file("lib/api_cases.ts", """
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-export const ARGUSCX_KEY = process.env.NEXT_PUBLIC_ARGUSCX_KEY || "acx_master_2026_hackathon";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api/v1";
 
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
@@ -269,8 +268,6 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
     headers.set("Content-Type", "application/json");
   }
   
-  headers.set("X-ArgusCX-Key", ARGUSCX_KEY);
-
   const response = await fetch(url, { ...options, headers });
   if (!response.ok) {
     throw new Error(`API Error ${response.status}`);

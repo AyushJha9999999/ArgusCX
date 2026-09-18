@@ -23,6 +23,7 @@ dist/
 *.egg-info/
 .eggs/
 .venv/
+.venv*/
 venv/
 env/
 pip-log.txt

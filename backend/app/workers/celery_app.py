@@ -6,10 +6,13 @@ All config from environment variables — no hardcoded values.
 from celery import Celery
 from app.core.config import settings
 
+if not settings.CELERY_BROKER_URL or not settings.CELERY_RESULT_BACKEND:
+    raise RuntimeError("CELERY_BROKER_URL and CELERY_RESULT_BACKEND must be configured before starting a worker.")
+
 celery_app = Celery(
     "arguscx",
-    broker=settings.CELERY_BROKER_URL,
-    backend=settings.CELERY_RESULT_BACKEND,
+    broker=settings.CELERY_BROKER_URL.get_secret_value(),
+    backend=settings.CELERY_RESULT_BACKEND.get_secret_value(),
     include=[
         "app.workers.tasks.evidence_tasks",
         "app.workers.tasks.notification_tasks",

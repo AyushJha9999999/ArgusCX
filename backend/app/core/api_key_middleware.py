@@ -5,6 +5,7 @@ Skips auth for health, docs, and the root endpoint.
 """
 from datetime import datetime
 from typing import Dict
+import secrets
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -24,9 +25,35 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     EXEMPT_PATHS = {
         "/", "/docs", "/redoc", "/openapi.json", "/metrics",
         "/api/v1/health", "/api/v1/health/",
-        "/api/v1/auth/login", "/api/v1/auth/logout",
+        "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/firebase",
+        "/api/v1/onboarding/assessment",
     }
     EXEMPT_PREFIXES = ("/ws/", "/docs", "/redoc")
+
+    @staticmethod
+    async def _has_valid_session_token(request: Request) -> bool:
+        """Allow a customer to access only their own verification session."""
+        if request.method not in {"GET", "POST"}:
+            return False
+        parts = request.url.path.strip("/").split("/")
+        # /api/v1/sessions/{session_id}[/complete]
+        if len(parts) not in {4, 5} or parts[:3] != ["api", "v1", "sessions"]:
+            return False
+        if len(parts) == 5 and parts[4] != "complete":
+            return False
+
+        token = request.headers.get("X-Session-Token") or request.query_params.get("token")
+        if not token:
+            return False
+            
+        from app.db.mongodb import get_sessions_col
+        sessions_col = get_sessions_col()
+        if sessions_col is None:
+            return False
+            
+        session = await sessions_col.find_one({"id": parts[3]})
+        expected = session.get("session_token") if session else None
+        return bool(expected and secrets.compare_digest(token, expected))
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -42,6 +69,10 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             if path.startswith(prefix):
                 return await call_next(request)
 
+        if await self._has_valid_session_token(request):
+            request.state.auth_type = "verification_session"
+            return await call_next(request)
+
         # Skip auth for non-API routes
         if not path.startswith("/api/"):
             return await call_next(request)
@@ -54,6 +85,13 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             auth_header = request.headers.get("Authorization", "")
             if auth_header.startswith("Bearer "):
                 api_key = auth_header[7:]
+
+                from app.api.routes.auth import decode_access_token
+                identity = decode_access_token(api_key)
+                if identity:
+                    request.state.authenticated_user = identity
+                    request.state.auth_type = "dashboard_jwt"
+                    return await call_next(request)
 
         # Also accept query parameter for easy testing
         if not api_key:
@@ -70,8 +108,10 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             )
 
         # Validate the key
-        from app.api.routes.api_keys import validate_api_key
-        record = validate_api_key(api_key)
+        from app.api.routes.api_keys import validate_api_key, validate_api_key_db
+        record = await validate_api_key_db(api_key)
+        if not record:
+            record = validate_api_key(api_key)
 
         if not record:
             return JSONResponse(
@@ -106,5 +146,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # Attach company info to request state
         request.state.company_name = record.company_name
         request.state.key_id = record.key_id
+        request.state.auth_type = "api_key"
 
         return await call_next(request)

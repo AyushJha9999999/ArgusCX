@@ -1,11 +1,10 @@
 /**
  * ArgusCX — Typed API Client
- * All fetch calls go through here. Reads NEXT_PUBLIC_API_URL from env.
+ * All browser calls use the same-origin `/api/v1` proxy. The backend address
+ * remains server-only in `ARGUSCX_API_URL`.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const API = `${API_BASE}/api/v1`;
-const ARGUSCX_KEY = process.env.NEXT_PUBLIC_ARGUSCX_KEY ?? "acx_master_2026_hackathon";
+const API = "/api/v1";
 
 // ─────────────────────────────────────────────
 //  TYPES
@@ -143,14 +142,25 @@ export interface AgentInfo {
 // ─────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(ARGUSCX_KEY ? { "X-ArgusCX-Key": ARGUSCX_KEY } : {}),
-      ...init?.headers,
-    },
-    ...init,
-  });
+  const headers = new Headers(init?.headers);
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  if (!headers.has("Content-Type") && !isFormData) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem("arguscx_dashboard_token");
+    if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${API}${path}`, {
+      ...init,
+      headers,
+      credentials: "same-origin",
+    });
+  } catch {
+    throw new Error("ArgusCX API is unavailable through the configured proxy. Start the backend and try again.");
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API ${path} → ${res.status}: ${text}`);
@@ -208,10 +218,16 @@ export async function resolveTicket(
 export async function uploadEvidence(file: File): Promise<EvidenceFile> {
   const form = new FormData();
   form.append("file", file);
+  const headers = new Headers();
+  if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem("arguscx_dashboard_token");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
   const res = await fetch(`${API}/evidence/upload`, {
     method: "POST",
-    headers: ARGUSCX_KEY ? { "X-ArgusCX-Key": ARGUSCX_KEY } : undefined,
+    headers,
     body: form,
+    credentials: "same-origin",
   });
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
   return res.json() as Promise<EvidenceFile>;

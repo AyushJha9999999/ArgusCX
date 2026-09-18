@@ -14,7 +14,7 @@ All ticket processing now goes through:
 import time
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.schemas import (
     Ticket, TicketCreate, TicketResponse, AgentState,
@@ -25,11 +25,9 @@ from app.agents.orchestrator import process_ticket
 from app.services.preprocessor import preprocess_request
 from app.services.guardrails import check_guardrails
 from app.core.config import settings
+from app.db.mongodb import get_tickets_col
 
 router = APIRouter(prefix="/tickets")
-
-# In-memory store (persists for the lifetime of the process)
-_tickets: Dict[str, Ticket] = {}
 
 
 class SubmitTicketRequest(BaseModel):
@@ -40,11 +38,14 @@ class SubmitTicketRequest(BaseModel):
     message: str
     channel: Channel = Channel.WEB
     category: Optional[TicketCategory] = None
-    account_age_days: Optional[int] = 180
+    account_age_days: Optional[int] = None
     previous_tickets: int = 0
     previous_fraud_flags: int = 0
-    evidence_file_ids: List[str] = []
-    evidence_urls: List[str] = []
+    evidence_file_ids: List[str] = Field(default_factory=list)
+    evidence_urls: List[str] = Field(default_factory=list)
+    order_id: Optional[str] = None
+    payment_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 @router.post("", response_model=TicketResponse)
@@ -114,6 +115,9 @@ async def submit_ticket(request: SubmitTicketRequest):
         category=category,
         evidence_files=evidence_files,
         metadata={
+            **request.metadata,
+            "order_id": request.order_id,
+            "payment_id": request.payment_id,
             "preprocessor": {
                 "language": preprocessed.language,
                 "intent": preprocessed.intent,
@@ -146,10 +150,22 @@ async def submit_ticket(request: SubmitTicketRequest):
     if not result_state.should_escalate:
         result_state.ticket.status = TicketStatus.AUTO_RESOLVED
 
+    if result_state.should_escalate:
+        from app.services.handoff_service import create_handoff
+        handoff = await create_handoff(
+            result_state.ticket,
+            reason=result_state.escalation_reason or "AI confidence or policy requires human review.",
+        )
+        result_state.ticket.metadata["human_handoff"] = {
+            key: value for key, value in handoff.items() if key != "context_packet"
+        }
+
     processing_time = int(time.time() * 1000) - start_ms
 
     # Persist to store
-    _tickets[result_state.ticket.id] = result_state.ticket
+    tickets_col = get_tickets_col()
+    if tickets_col is not None:
+        await tickets_col.insert_one(result_state.ticket.model_dump(mode="json"))
 
     # Broadcast real-time update via WebSocket
     try:
@@ -171,7 +187,6 @@ async def submit_ticket(request: SubmitTicketRequest):
     return TicketResponse(
         ticket=result_state.ticket,
         processing_time_ms=processing_time,
-        demo_mode=False,
     )
 
 
@@ -183,60 +198,98 @@ async def list_tickets(
     offset: int = 0,
 ):
     """List all tickets with optional filters."""
-    tickets = list(_tickets.values())
+    tickets_col = get_tickets_col()
+    if tickets_col is None:
+        return []
+        
+    query = {}
     if status:
-        tickets = [t for t in tickets if t.status == status]
+        query["status"] = status.value
     if category:
-        tickets = [t for t in tickets if t.category == category]
-    tickets.sort(key=lambda t: t.created_at, reverse=True)
-    return tickets[offset: offset + limit]
+        query["category"] = category.value
+        
+    cursor = tickets_col.find(query).sort("created_at", -1).skip(offset).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return [Ticket(**doc) for doc in docs]
 
 
 @router.get("/stats/summary")
 async def ticket_stats() -> Dict[str, Any]:
     """Quick stats for the dashboard header."""
-    tickets = list(_tickets.values())
-    total = len(tickets)
-    if total == 0:
+    tickets_col = get_tickets_col()
+    if tickets_col is None:
         return {
-            "total": 0,
-            "auto_resolved": 0,
-            "escalated": 0,
-            "fraud_flagged": 0,
-            "avg_confidence": 0.0,
-            "avg_risk": 0.0,
+            "total": 0, "auto_resolved": 0, "escalated": 0,
+            "fraud_flagged": 0, "avg_confidence": 0.0, "avg_risk": 0.0,
         }
 
+    pipeline = [
+        {
+            "$group": {
+                "_id": None,
+                "total": {"$sum": 1},
+                "auto_resolved": {
+                    "$sum": {"$cond": [{"$eq": ["$status", TicketStatus.AUTO_RESOLVED.value]}, 1, 0]}
+                },
+                "escalated": {
+                    "$sum": {"$cond": [{"$eq": ["$status", TicketStatus.ESCALATED.value]}, 1, 0]}
+                },
+                "fraud_flagged": {
+                    "$sum": {
+                        "$cond": [
+                            {"$or": [
+                                {"$eq": ["$status", TicketStatus.FRAUD_FLAGGED.value]},
+                                {"$gte": ["$fraud_analysis.fraud_score", 0.65]}
+                            ]}, 1, 0
+                        ]
+                    }
+                },
+                "avg_confidence": {"$avg": "$confidence_score"},
+                "avg_risk": {"$avg": "$risk_score"}
+            }
+        }
+    ]
+    
+    docs = await tickets_col.aggregate(pipeline).to_list(length=1)
+    if not docs:
+        return {
+            "total": 0, "auto_resolved": 0, "escalated": 0,
+            "fraud_flagged": 0, "avg_confidence": 0.0, "avg_risk": 0.0,
+        }
+        
+    stats = docs[0]
     return {
-        "total": total,
-        "auto_resolved": sum(1 for t in tickets if t.status == TicketStatus.AUTO_RESOLVED),
-        "escalated": sum(1 for t in tickets if t.status == TicketStatus.ESCALATED),
-        "fraud_flagged": sum(
-            1 for t in tickets
-            if t.status == TicketStatus.FRAUD_FLAGGED
-            or (t.fraud_analysis and t.fraud_analysis.fraud_score >= 0.65)
-        ),
-        "avg_confidence": round(sum(t.confidence_score for t in tickets) / total, 3),
-        "avg_risk": round(sum(t.risk_score for t in tickets) / total, 3),
+        "total": stats.get("total", 0),
+        "auto_resolved": stats.get("auto_resolved", 0),
+        "escalated": stats.get("escalated", 0),
+        "fraud_flagged": stats.get("fraud_flagged", 0),
+        "avg_confidence": round(stats.get("avg_confidence", 0.0) or 0.0, 3),
+        "avg_risk": round(stats.get("avg_risk", 0.0) or 0.0, 3),
     }
 
 
 @router.get("/{ticket_id}", response_model=Ticket)
 async def get_ticket(ticket_id: str):
     """Get a specific ticket by ID including full case file."""
-    ticket = _tickets.get(ticket_id)
-    if not ticket:
+    tickets_col = get_tickets_col()
+    doc = await tickets_col.find_one({"id": ticket_id}) if tickets_col is not None else None
+    if not doc:
         raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
-    return ticket
+    return Ticket(**doc)
 
 
 @router.patch("/{ticket_id}/resolve")
 async def human_resolve(ticket_id: str, override: HumanOverride):
     """Human agent override — approve, reject, or modify."""
-    ticket = _tickets.get(ticket_id)
-    if not ticket:
+    tickets_col = get_tickets_col()
+    if tickets_col is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+        
+    doc = await tickets_col.find_one({"id": ticket_id})
+    if not doc:
         raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
 
+    ticket = Ticket(**doc)
     action = override.action.lower()
     if action == "approve":
         ticket.status = TicketStatus.CLOSED
@@ -257,7 +310,7 @@ async def human_resolve(ticket_id: str, override: HumanOverride):
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {override.action}")
 
-    _tickets[ticket_id] = ticket
+    await tickets_col.replace_one({"id": ticket_id}, ticket.model_dump(mode="json"))
 
     try:
         from app.api.websockets.ticket_ws import broadcast

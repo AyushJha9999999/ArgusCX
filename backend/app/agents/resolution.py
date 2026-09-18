@@ -1,39 +1,41 @@
-"""
-ArgusCX — Resolution Agent
-Applies policy engine and makes final resolution decision using Groq LLM.
-Uses centralized prompts and the policy engine service.
-"""
-from typing import Any, Dict, Optional
-import structlog
-from pydantic import BaseModel, Field
-from langchain_core.prompts import ChatPromptTemplate
-from app.models.schemas import AgentState, ResolutionDecision, FraudRiskLevel, TicketCategory
-from app.core.config import settings
-from app.core.llm import get_llm
-from app.services.prompt_manager import get_system_prompt
-from app.services.policy_engine import evaluate_policies
+"""Resolution agent with a human-safe failure mode."""
 import json
+from typing import Any, Dict, Optional
+
+import structlog
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+
+from app.core.llm import get_llm
+from app.models.schemas import AgentState, ResolutionDecision
+from app.services.policy_engine import evaluate_policies
+from app.services.prompt_manager import get_system_prompt
 
 logger = structlog.get_logger(__name__)
 
 
 class ResolutionOutput(BaseModel):
-    decision: ResolutionDecision = Field(description="The final resolution decision")
-    message: str = Field(description="The customer-facing message explaining the resolution.")
-    confidence: float = Field(description="Confidence score between 0.0 and 1.0.")
-    should_escalate: bool = Field(description="True if human intervention is required, False otherwise.")
-    escalation_reason: Optional[str] = Field(default=None, description="Reason for escalation if applicable, else null.")
-    reasoning: str = Field(description="Internal reasoning chain for this decision.")
+    decision: ResolutionDecision
+    message: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    should_escalate: bool
+    escalation_reason: Optional[str] = None
+    reasoning: str
+
+
+def _human_review(reason: str) -> Dict[str, Any]:
+    return {
+        "decision": ResolutionDecision.ESCALATE_TO_HUMAN,
+        "message": "Your case is being reviewed by a support specialist.",
+        "confidence": 0.0,
+        "should_escalate": True,
+        "escalation_reason": reason,
+        "reasoning": "No automated resolution was issued; a human decision is required.",
+    }
 
 
 async def run_resolution_agent(state: AgentState) -> Dict[str, Any]:
-    """
-    Uses Groq LLM + Policy Engine to make a resolution decision.
-    No hardcoded logic — everything goes through the LLM.
-    """
-    logger.info("✅ Resolution agent running", ticket_id=state.ticket.id)
-
-    # ── Step 1: Evaluate policies via LLM ────────────
+    """Make a governed decision only when policy context and AI are available."""
     policy_result = await evaluate_policies(
         category=state.ticket.category.value if state.ticket.category else "general",
         message=state.ticket.message,
@@ -41,120 +43,44 @@ async def run_resolution_agent(state: AgentState) -> Dict[str, Any]:
         fraud_score=state.fraud_analysis.fraud_score if state.fraud_analysis else 0.0,
         order_data=state.order_data,
     )
-
-    # ── Step 2: Make resolution decision via LLM ─────
     llm = get_llm(temperature=0.1)
     if not llm:
-        import random
-        logger.warning("No LLM configured for resolution — using fallback logic")
-        
-        fraud_risk = state.fraud_analysis.fraud_risk_level if state.fraud_analysis else FraudRiskLevel.LOW
-        
-        if fraud_risk == FraudRiskLevel.CRITICAL:
-            return {
-                "decision": ResolutionDecision.FRAUD_REJECT,
-                "message": "We have detected severe anomalies in your request. Your ticket has been rejected for suspected policy violation.",
-                "confidence": round(random.uniform(0.95, 0.99), 3),
-                "should_escalate": False,
-                "escalation_reason": None,
-                "reasoning": "Critical fraud detected. Rejecting ticket.",
-            }
-        elif fraud_risk in [FraudRiskLevel.HIGH, FraudRiskLevel.MEDIUM]:
-            return {
-                "decision": ResolutionDecision.ESCALATE_TO_HUMAN,
-                "message": "Your case has been forwarded to a specialist for review.",
-                "confidence": round(random.uniform(0.80, 0.92), 3),
-                "should_escalate": True,
-                "escalation_reason": "Suspicious evidence requires human review",
-                "reasoning": "High fraud risk detected — escalating to human agent.",
-            }
-        else:
-            return {
-                "decision": ResolutionDecision.AUTO_RESOLVE,
-                "message": "Your request has been verified and automatically approved.",
-                "confidence": round(random.uniform(0.88, 0.95), 3),
-                "should_escalate": False,
-                "escalation_reason": None,
-                "reasoning": "Low risk, auto-resolving.",
-            }
+        return _human_review("AI reasoning is not configured for this workspace.")
+    if not state.retrieved_policies:
+        return _human_review("No organisation policy has been ingested for this case type.")
 
+    investigation_step = next(
+        (step for step in state.ticket.agent_steps if step.agent_type.value == "data_investigation"),
+        None,
+    )
     prompt = ChatPromptTemplate.from_messages([
-        ("system", get_system_prompt("resolution")),
+        ("system", get_system_prompt("resolution") + "\nNever approve, deny, refund, or punish a customer when evidence or policy is missing; route to human review."),
         ("user", """Ticket ID: {ticket_id}
 Subject: {subject}
 Message: {message}
 
-Retrieved Policies:
-{policies}
-
-Policy Engine Assessment:
-- Applicable Policies: {applicable_policies}
-- Permitted Actions: {permitted_actions}
-- Constraints: {constraints}
-- Auto-Resolve Eligible: {auto_resolve}
-- Policy Reasoning: {policy_reasoning}
-
-Fraud Analysis:
-{fraud_analysis}
-
-Investigation Data:
-- Order: {order_data}
-- Payment: {payment_data}
-- Anomalies Found: {anomalies}
-- Investigation Reasoning: {investigation_reasoning}
-"""),
+Organisation policies: {policies}
+Policy assessment: {policy_result}
+Fraud analysis: {fraud_analysis}
+Order data: {order_data}
+Payment data: {payment_data}
+Investigation: {investigation}"""),
     ])
-
-    structured_llm = llm.with_structured_output(ResolutionOutput)
-    chain = prompt | structured_llm
-
     try:
-        fraud_json = state.fraud_analysis.model_dump_json() if state.fraud_analysis else "No evidence provided."
-        order_json = json.dumps(state.order_data, default=str) if state.order_data else "No order data found."
-        payment_json = json.dumps(state.payment_data, default=str) if state.payment_data else "No payment data."
-        policies_text = "\n".join(state.retrieved_policies) if state.retrieved_policies else "No policies retrieved."
-
-        # Get investigation anomalies from agent steps
-        investigation_step = next(
-            (s for s in state.ticket.agent_steps if s.agent_type.value == "data_investigation"),
-            None,
-        )
-        anomalies = investigation_step.output_data.get("anomalies", []) if investigation_step else []
-        inv_reasoning = investigation_step.output_data.get("reasoning", "No investigation data.") if investigation_step else "No investigation data."
-
-        result: ResolutionOutput = await chain.ainvoke({
+        output: ResolutionOutput = await (prompt | llm.with_structured_output(ResolutionOutput)).ainvoke({
             "ticket_id": state.ticket.id,
             "subject": state.ticket.subject,
             "message": state.ticket.message,
-            "policies": policies_text,
-            "applicable_policies": ", ".join(policy_result.applicable_policies),
-            "permitted_actions": ", ".join(policy_result.permitted_actions),
-            "constraints": ", ".join(policy_result.constraints) if policy_result.constraints else "None",
-            "auto_resolve": policy_result.auto_resolve_eligible,
-            "policy_reasoning": policy_result.reasoning,
-            "fraud_analysis": fraud_json,
-            "order_data": order_json,
-            "payment_data": payment_json,
-            "anomalies": ", ".join(anomalies) if anomalies else "None detected",
-            "investigation_reasoning": inv_reasoning,
+            "policies": "\n".join(state.retrieved_policies),
+            "policy_result": policy_result.model_dump_json(),
+            "fraud_analysis": state.fraud_analysis.model_dump_json() if state.fraud_analysis else "not assessed",
+            "order_data": json.dumps(state.order_data, default=str),
+            "payment_data": json.dumps(state.payment_data, default=str),
+            "investigation": json.dumps(investigation_step.output_data if investigation_step else {}, default=str),
         })
-
-        logger.info(
-            "Resolution decision made",
-            decision=result.decision.value,
-            confidence=result.confidence,
-            should_escalate=result.should_escalate,
-        )
-
-        return result.model_dump()
-    except Exception as e:
-        logger.error("LLM Resolution failed", error=str(e))
-        return {
-            "decision": ResolutionDecision.ESCALATE_TO_HUMAN,
-            "message": "Your case is being reviewed by our team. We'll get back to you shortly.",
-            "confidence": 0.5,
-            "should_escalate": True,
-            "escalation_reason": f"Resolution LLM error: {str(e)[:60]}",
-            "reasoning": f"Resolution agent encountered an error: {str(e)[:80]}",
-            "error": str(e),
-        }
+        if output.decision != ResolutionDecision.ESCALATE_TO_HUMAN and not policy_result.auto_resolve_eligible:
+            return _human_review("The applicable policy does not permit an automated outcome.")
+        return output.model_dump()
+    except Exception as exc:
+        logger.error("Resolution reasoning failed", error=str(exc))
+        return _human_review("AI reasoning did not complete; a human review is required.")

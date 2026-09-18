@@ -192,7 +192,6 @@ class Ticket(BaseModel):
 class TicketResponse(BaseModel):
     ticket: Ticket
     processing_time_ms: int
-    demo_mode: bool = False
 
 
 # ─────────────────────────────────────────────

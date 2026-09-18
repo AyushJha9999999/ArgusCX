@@ -1,21 +1,32 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getCases } from '../../../lib/api_cases';
+import { getCases, type VerificationCase } from '../../../lib/api_cases';
 
 export default function CasesList() {
   const router = useRouter();
-  const [cases, setCases] = useState<any[]>([]);
+  const [cases, setCases] = useState<VerificationCase[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    getCases().then(data => {
-      setCases(data.cases || []);
-      setLoading(false);
-    }).catch(err => {
-      console.error(err);
-      setLoading(false);
-    });
+    let active = true;
+
+    getCases()
+      .then((data) => {
+        if (!active) return;
+        setCases(Array.isArray(data.cases) ? data.cases : []);
+      })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        console.error(reason);
+        setError(reason instanceof Error ? reason.message : "Unable to load verification cases.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => { active = false; };
   }, []);
 
   return (
@@ -42,6 +53,12 @@ export default function CasesList() {
           <div style={{ color: 'var(--accent-cyan)', fontSize: 18, animation: 'pulse-glow-v2 1.5s infinite' }}>
             Synchronizing cryptographic ledger...
           </div>
+        </div>
+      ) : error ? (
+        <div className="glass-panel" role="alert" style={{ padding: 28, borderRadius: 16, color: 'var(--text-secondary)' }}>
+          <div style={{ color: 'var(--warning)', fontWeight: 700, marginBottom: 8 }}>The verification ledger is unavailable.</div>
+          <div>{error}</div>
+          <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-muted)' }}>Check that the ArgusCX backend is running and that you are signed in.</div>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 24 }}>

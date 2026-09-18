@@ -22,7 +22,7 @@ class EscalationOutput(BaseModel):
     recommended_action: str = Field(description="Specific actionable recommendations for the human agent based on policies and fraud analysis.")
 
 
-def _get_demo_escalation(state: AgentState) -> Dict[str, Any]:
+def _build_policy_handoff(state: AgentState) -> Dict[str, Any]:
     fraud = state.fraud_analysis
     risk_score = state.risk_score
     confidence = state.confidence_score
@@ -64,7 +64,7 @@ async def run_escalation_agent(state: AgentState) -> Dict[str, Any]:
     
     if not llm:
         logger.warning("No LLM provider configured, using heuristic escalation packaging.")
-        escalation_data = _get_demo_escalation(state)
+        escalation_data = _build_policy_handoff(state)
     else:
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You are the Escalation Handoff Agent for ArgusCX.
@@ -103,7 +103,7 @@ Retrieved Policies: {policies}""")
             escalation_data = result.model_dump()
         except Exception as e:
             logger.error("LLM Escalation failed, falling back to heuristic.", error=str(e))
-            escalation_data = _get_demo_escalation(state)
+            escalation_data = _build_policy_handoff(state)
 
     ticket = state.ticket
     fraud = state.fraud_analysis
@@ -112,6 +112,7 @@ Retrieved Policies: {policies}""")
         "case_id": ticket.id,
         "generated_at": datetime.utcnow().isoformat(),
         "priority": escalation_data["priority"],
+        "assigned_team": escalation_data["assigned_team"],
         "summary": escalation_data["summary"],
         "customer_profile": {
             "id": ticket.customer.id,
@@ -160,11 +161,6 @@ Retrieved Policies: {policies}""")
 
     state.ticket.case_file = case_file
     state.ticket.status = TicketStatus.ESCALATED
-
-    if settings.SLACK_WEBHOOK_URL and not settings.is_demo_mode:
-        await _notify_slack(case_file)
-    else:
-        logger.info("📩 [DEMO] Slack notification would be sent", case_id=case_file["case_id"])
 
     return {
         "case_file": case_file,

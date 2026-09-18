@@ -1,52 +1,51 @@
+"""S3-compatible evidence storage.
+
+The service returns no upload link until real object storage is configured.
 """
-ArgusCX -- Storage Service
-MinIO/S3 presigned upload URLs + evidence download.
-Gracefully degrades to stub mode when MinIO is unavailable.
-"""
-import os
 from datetime import timedelta
 from typing import Optional
+
 import structlog
+
+from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
 try:
     from minio import Minio
-    MINIO_AVAILABLE = True
-except ImportError:
-    MINIO_AVAILABLE = False
+except ImportError:  # pragma: no cover - dependency is deployment-specific
+    Minio = None
 
 _client = None
-_bucket_name = "argusgx-evidence"
 
 
 def _get_client():
     global _client
     if _client is not None:
         return _client
-    if not MINIO_AVAILABLE:
+    if not Minio or not all((settings.OBJECT_STORAGE_ENDPOINT, settings.OBJECT_STORAGE_ACCESS_KEY, settings.OBJECT_STORAGE_SECRET_KEY, settings.OBJECT_STORAGE_BUCKET)):
         return None
-    try:
-        endpoint   = os.environ.get("MINIO_ENDPOINT",   "localhost:9000")
-        access_key = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
-        secret_key = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
-        secure     = os.environ.get("MINIO_SECURE", "false").lower() == "true"
-        _client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
-    except Exception as exc:
-        logger.error("MinIO init failed", error=str(exc))
-        _client = None
+    _client = Minio(
+        settings.OBJECT_STORAGE_ENDPOINT,
+        access_key=settings.OBJECT_STORAGE_ACCESS_KEY.get_secret_value(),
+        secret_key=settings.OBJECT_STORAGE_SECRET_KEY.get_secret_value(),
+        secure=settings.OBJECT_STORAGE_SECURE,
+    )
     return _client
 
 
-def ensure_bucket():
-    c = _get_client()
-    if not c:
-        return
+def ensure_bucket() -> bool:
+    client = _get_client()
+    bucket = settings.OBJECT_STORAGE_BUCKET
+    if not client or not bucket:
+        return False
     try:
-        if not c.bucket_exists(_bucket_name):
-            c.make_bucket(_bucket_name)
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+        return True
     except Exception as exc:
-        logger.error("ensure_bucket failed", error=str(exc))
+        logger.error("Object storage bucket check failed", error=str(exc))
+        return False
 
 
 def generate_presigned_upload_url(
@@ -55,33 +54,35 @@ def generate_presigned_upload_url(
     mime_type: str = "video/mp4",
     ttl_minutes: int = 15,
 ) -> Optional[str]:
-    c = _get_client()
-    if not c:
-        return f"http://localhost:9000/{_bucket_name}/{session_id}/{evidence_id}"
-    obj = f"{session_id}/{evidence_id}"
+    client = _get_client()
+    bucket = settings.OBJECT_STORAGE_BUCKET
+    if not client or not bucket or not ensure_bucket():
+        return None
     try:
-        return c.presigned_put_object(_bucket_name, obj, expires=timedelta(minutes=ttl_minutes))
+        return client.presigned_put_object(bucket, f"{session_id}/{evidence_id}", expires=timedelta(minutes=ttl_minutes))
     except Exception as exc:
-        logger.error("presigned_url_failed", error=str(exc))
+        logger.error("Presigned upload URL creation failed", error=str(exc))
         return None
 
 
-def get_evidence_url(session_id: str, evidence_id: str) -> str:
-    return f"/{_bucket_name}/{session_id}/{evidence_id}"
+def get_evidence_url(session_id: str, evidence_id: str) -> Optional[str]:
+    bucket = settings.OBJECT_STORAGE_BUCKET
+    return f"/{bucket}/{session_id}/{evidence_id}" if bucket else None
 
 
 def download_evidence_bytes(storage_url: str) -> Optional[bytes]:
-    c = _get_client()
-    if not c:
+    client = _get_client()
+    bucket = settings.OBJECT_STORAGE_BUCKET
+    if not client or not bucket:
         return None
     try:
-        parts = storage_url.lstrip("/").split("/", 1)
-        bucket = parts[0] if len(parts) > 0 else _bucket_name
-        obj    = parts[1] if len(parts) > 1 else storage_url
-        resp = c.get_object(bucket, obj)
-        data = resp.read()
-        resp.close()
-        return data
+        object_name = storage_url.removeprefix(f"/{bucket}/")
+        response = client.get_object(bucket, object_name)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
     except Exception as exc:
-        logger.error("download_evidence_failed", url=storage_url, error=str(exc))
+        logger.error("Evidence download failed", error=str(exc))
         return None

@@ -13,7 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.openapi.utils import get_openapi
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from app.api.routes import tickets, agents, analytics, knowledge, evidence, health, auth, api_keys, sessions, cases, demo
+from app.api.routes import tickets, agents, analytics, knowledge, evidence, health, auth, api_keys, sessions, cases, onboarding, integrations, handoffs, channels
 from app.api.websockets import ticket_ws
 from app.core.config import settings
 from app.core.logging import setup_logging
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
         "✅ ArgusCX ready",
         env=settings.APP_ENV,
         llm_provider=settings.active_llm_provider,
-        demo_mode=settings.is_demo_mode,
+        configured_connectors=settings.active_connectors,
     )
     yield
 
@@ -142,7 +142,10 @@ app.include_router(knowledge.router, prefix=API_PREFIX, tags=["Knowledge Base"])
 app.include_router(evidence.router, prefix=API_PREFIX, tags=["Evidence & Fraud"])
 app.include_router(sessions.router, prefix=API_PREFIX, tags=["Sessions"])
 app.include_router(cases.router, prefix=API_PREFIX, tags=["Cases"])
-app.include_router(demo.router, prefix=API_PREFIX, tags=["Demo"])
+app.include_router(onboarding.router, prefix=API_PREFIX, tags=["Onboarding"])
+app.include_router(integrations.router, prefix=API_PREFIX, tags=["Integrations"])
+app.include_router(handoffs.router, prefix=API_PREFIX, tags=["Human Handoffs"])
+app.include_router(channels.router, prefix=API_PREFIX, tags=["Support Channels"])
 
 # WebSocket
 app.include_router(ticket_ws.router, tags=["WebSocket"])
@@ -163,10 +166,6 @@ def custom_openapi():
         contact=app.contact,
         license_info=app.license_info,
     )
-    schema["servers"] = [
-        {"url": "http://localhost:8000", "description": "Local Docker development"},
-        {"url": "https://api.example.com", "description": "Production placeholder"},
-    ]
     schema.setdefault("components", {}).setdefault("securitySchemes", {})["ArgusCXKey"] = {
         "type": "apiKey",
         "in": "header",

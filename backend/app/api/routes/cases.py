@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import structlog
 
-from app.api.routes.sessions import _cases, _sessions
+from app.db.mongodb import get_cases_col, get_sessions_col
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/cases")
@@ -33,18 +33,27 @@ async def list_cases(
     offset: int = 0,
 ):
     """List all cases, optionally filtered by state."""
-    all_cases = list(_cases.values())
+    cases_col = get_cases_col()
+    sessions_col = get_sessions_col()
+    if cases_col is None or sessions_col is None:
+        return {"total": 0, "cases": [], "limit": limit, "offset": offset}
+        
+    query = {}
     if state:
-        all_cases = [c for c in all_cases if c.get("state") == state.upper()]
-    total = len(all_cases)
-    page = all_cases[offset:offset + limit]
+        query["state"] = state.upper()
+        
+    total = await cases_col.count_documents(query)
+    cursor = cases_col.find(query).skip(offset).limit(limit)
+    page = await cursor.to_list(length=limit)
+    
     # Enrich with session info
     enriched = []
     for c in page:
         sid = c.get("session_id")
-        sess = _sessions.get(sid, {})
+        sess = await sessions_col.find_one({"id": sid}) or {}
         enriched.append({
             **c,
+            "_id": str(c.get("_id")) if c.get("_id") else None,
             "order_id": sess.get("order_id"),
             "customer_ref": sess.get("customer_ref"),
             "category": sess.get("category"),
@@ -57,11 +66,20 @@ async def list_cases(
 @router.get("/{case_id}")
 async def get_case(case_id: str):
     """Full case report with all signals and evidence."""
-    case = next((c for c in _cases.values() if c.get("id") == case_id), None)
+    cases_col = get_cases_col()
+    sessions_col = get_sessions_col()
+    if cases_col is None or sessions_col is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+        
+    case = await cases_col.find_one({"id": case_id})
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+        
+    if "_id" in case:
+        case["_id"] = str(case["_id"])
+        
     sid = case.get("session_id")
-    session = _sessions.get(sid, {})
+    session = await sessions_col.find_one({"id": sid}) or {}
     return {
         **case,
         "session": {
@@ -83,16 +101,26 @@ async def get_case(case_id: str):
 @router.post("/{case_id}/review")
 async def review_case(case_id: str, req: ReviewRequest):
     """Reviewer submits a decision on a case."""
-    case = next((c for c in _cases.values() if c.get("id") == case_id), None)
+    cases_col = get_cases_col()
+    if cases_col is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+        
+    case = await cases_col.find_one({"id": case_id})
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+        
     valid_decisions = {"APPROVED", "REJECTED", "ESCALATED"}
     if req.decision.upper() not in valid_decisions:
         raise HTTPException(status_code=422, detail=f"Decision must be one of {valid_decisions}")
-    case["reviewer_id"] = req.reviewer_id
-    case["reviewer_decision"] = req.decision.upper()
-    case["reviewer_notes"] = req.notes
-    case["reviewed_at"] = datetime.utcnow().isoformat()
+        
+    update = {
+        "reviewer_id": req.reviewer_id,
+        "reviewer_decision": req.decision.upper(),
+        "reviewer_notes": req.notes,
+        "reviewed_at": datetime.utcnow().isoformat()
+    }
+    await cases_col.update_one({"id": case_id}, {"$set": update})
+    
     logger.info("Case reviewed", case_id=case_id, decision=req.decision, reviewer=req.reviewer_id)
     return {"message": "Review recorded", "case_id": case_id, "decision": req.decision.upper()}
 
@@ -100,11 +128,20 @@ async def review_case(case_id: str, req: ReviewRequest):
 @router.post("/{case_id}/escalate")
 async def escalate_case(case_id: str, reason: Optional[str] = None):
     """Force a case to REVIEW_REQUIRED state."""
-    case = next((c for c in _cases.values() if c.get("id") == case_id), None)
+    cases_col = get_cases_col()
+    if cases_col is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+        
+    case = await cases_col.find_one({"id": case_id})
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-    case["state"] = "REVIEW_REQUIRED"
-    case["routing"] = "REVIEW_REQUIRED"
+        
+    update = {
+        "state": "REVIEW_REQUIRED",
+        "routing": "REVIEW_REQUIRED",
+    }
     if reason:
-        case["reasoning_narrative"] = (case.get("reasoning_narrative") or "") + f" [Escalated: {reason}]"
+        update["reasoning_narrative"] = (case.get("reasoning_narrative") or "") + f" [Escalated: {reason}]"
+        
+    await cases_col.update_one({"id": case_id}, {"$set": update})
     return {"message": "Case escalated", "case_id": case_id, "state": "REVIEW_REQUIRED"}

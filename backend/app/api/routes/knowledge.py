@@ -3,10 +3,10 @@ ArgusCX — Knowledge Base Routes
 Exposes the in-memory RAG store for browsing and manual search.
 """
 from typing import List, Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.rag.retriever import retrieve_documents
+from app.rag.retriever import get_vector_store, retrieve_documents
 from app.rag.indexer import ALL_DOCUMENTS
 from app.models.schemas import KnowledgeDocument, RAGResult
 
@@ -19,6 +19,13 @@ class SearchRequest(BaseModel):
     top_k: int = 5
 
 
+class KnowledgeDocumentCreate(BaseModel):
+    title: str
+    content: str
+    category: str = "policies"
+    tags: List[str] = []
+
+
 @router.get("/documents", response_model=List[dict])
 async def list_documents(
     category: Optional[str] = Query(None, description="Filter by category: policies | faqs | past_tickets"),
@@ -29,6 +36,23 @@ async def list_documents(
     if category:
         docs = [d for d in docs if d.get("category") == category]
     return docs[:limit]
+
+
+@router.post("/documents", response_model=dict, status_code=201)
+async def add_document(document: KnowledgeDocumentCreate):
+    """Ingest an organisation-owned policy, FAQ, or approved runbook."""
+    normalized = {
+        "title": document.title.strip(),
+        "content": document.content.strip(),
+        "category": document.category.strip().lower(),
+        "tags": [tag.strip().lower() for tag in document.tags if tag.strip()],
+    }
+    if not normalized["title"] or not normalized["content"]:
+        raise HTTPException(status_code=422, detail="title and content are required")
+    ALL_DOCUMENTS.append(normalized)
+    store = await get_vector_store()
+    await store.add_documents([normalized])
+    return {"document": normalized, "total_documents": len(ALL_DOCUMENTS)}
 
 
 @router.post("/search", response_model=dict)

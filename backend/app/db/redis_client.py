@@ -15,25 +15,30 @@ redis_client: aioredis.Redis | None = None
 async def init_redis():
     global redis_client
 
+    if not settings.REDIS_URL:
+        logger.info("Redis is not configured; cache and task queue features are disabled")
+        return
+
     try:
+        redis_url = settings.REDIS_URL.get_secret_value()
         redis_client = aioredis.from_url(
-            settings.REDIS_URL,
+            redis_url,
             encoding="utf-8",
             decode_responses=True,
             socket_connect_timeout=5,
         )
         await redis_client.ping()
-        logger.info("✅ Redis connected", url=settings.REDIS_URL.split("@")[-1] if "@" in settings.REDIS_URL else settings.REDIS_URL)
+        logger.info("✅ Redis connected", url=redis_url.split("@")[-1] if "@" in redis_url else redis_url)
     except Exception as exc:
         logger.warning(
-            "⚠️  Redis not reachable — running without cache (demo mode)",
+            "Redis not reachable; cache and task queue features are unavailable",
             error=str(exc),
         )
         redis_client = None
 
 
 def get_redis() -> aioredis.Redis | None:
-    """Return the active Redis client or None in demo mode."""
+    """Return the active Redis client when available."""
     return redis_client
 
 

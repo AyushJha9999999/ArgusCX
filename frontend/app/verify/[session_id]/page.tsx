@@ -5,6 +5,7 @@
  * iOS Safari compatible: video element with playsinline + muted + autoplay.
  */
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
 
 interface Challenge {
   step_index: number;
@@ -30,8 +31,13 @@ type CapturePhase =
   | "error"
   | "expired";
 
-export default function VerifyPage({ params }: { params: { session_id: string } }) {
+export default function VerifyPage() {
+  const params = useParams<{ session_id: string }>();
   const sessionId = params.session_id;
+  const [sessionToken] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("token");
+  });
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -43,40 +49,47 @@ export default function VerifyPage({ params }: { params: { session_id: string } 
   const [uploadProgress, setUploadProgress] = useState(0);
   const [qualityWarning, setQualityWarning] = useState<string>("");
 
-  // Fetch session data
+  // Re-attach the stream once the <video> element is actually in the DOM.
+  // requestCamera() may call setPhase("challenge") before the video element
+  // is mounted, making videoRef.current null at that point.
   useEffect(() => {
-    fetch(`/api/v1/sessions/${sessionId}`)
-      .then((r) => {
-        if (r.status === 410) { setPhase("expired"); return null; }
-        if (!r.ok) throw new Error("Session not found");
-        return r.json();
+    if (phase === "challenge" && videoRef.current && streamRef.current) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => {/* autoplay policy — muted so this rarely fails */});
+      }
+    }
+  }, [phase]);
+
+  // Fetch the capture plan using the scoped token embedded in the QR/link.
+  useEffect(() => {
+    if (!sessionId || !sessionToken) {
+      setError("This verification link is incomplete. Request a new link from support.");
+      setPhase("error");
+      return;
+    }
+
+    fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
+      headers: { "X-Session-Token": sessionToken },
+    })
+      .then((response) => {
+        if (response.status === 410) {
+          setPhase("expired");
+          return null;
+        }
+        if (!response.ok) throw new Error("Session not found or this link has expired.");
+        return response.json() as Promise<SessionData>;
       })
       .then((data) => {
         if (!data) return;
-        // Also fetch full session with challenges
-        return fetch(`/api/v1/sessions/${sessionId}/result`).catch(() => null);
+        setSession(data);
+        setPhase("permission_request");
       })
-      .catch((e) => {
-        setError(e.message);
+      .catch((reason: unknown) => {
+        setError(reason instanceof Error ? reason.message : "Could not load this verification session.");
         setPhase("error");
       });
-
-    // Load session including challenges from the create response stored in sessionStorage
-    const stored = sessionStorage.getItem(`argusgx_session_${sessionId}`);
-    if (stored) {
-      setSession(JSON.parse(stored));
-      setPhase("permission_request");
-    } else {
-      // Fallback: fetch session status (won't have challenges without token)
-      fetch(`/api/v1/sessions/${sessionId}`)
-        .then((r) => r.json())
-        .then((data) => {
-          setSession({ session_id: sessionId, challenges: [], capture_url: "", expires_at: data.expires_at });
-          setPhase("permission_request");
-        })
-        .catch(() => { setPhase("error"); setError("Could not load session."); });
-    }
-  }, [sessionId]);
+  }, [sessionId, sessionToken]);
 
   const requestCamera = useCallback(async () => {
     try {
@@ -105,26 +118,32 @@ export default function VerifyPage({ params }: { params: { session_id: string } 
 
   const completeChallenge = useCallback(() => {
     const idx = currentChallengeIdx;
-    setCompletedChallenges((prev) => [...prev, idx]);
+    const nextCompleted = [...completedChallenges, idx];
+    setCompletedChallenges(nextCompleted);
     const challenges = session?.challenges || [];
     if (idx + 1 >= challenges.length) {
       // All challenges done -- submit
-      submitSession();
+      submitSession(nextCompleted);
     } else {
       setCurrentChallengeIdx(idx + 1);
     }
-  }, [currentChallengeIdx, session]);
+  }, [completedChallenges, currentChallengeIdx, session]);
 
-  const submitSession = useCallback(async () => {
+  const submitSession = useCallback(async (challengeIndexes: number[]) => {
+    if (!sessionToken) {
+      setError("This verification link is incomplete. Request a new link from support.");
+      setPhase("error");
+      return;
+    }
     setPhase("uploading");
     setUploadProgress(10);
     try {
-      const resp = await fetch(`/api/v1/sessions/${sessionId}/complete`, {
+      const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/complete`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Session-Token": sessionToken },
         body: JSON.stringify({
           assurance_level: "live_video",
-          evidence_ids: completedChallenges.map((i) => `frame_${i}_${Date.now()}`),
+          evidence_ids: challengeIndexes.map((i) => `frame_${i}_${Date.now()}`),
         }),
       });
       setUploadProgress(100);
@@ -140,7 +159,7 @@ export default function VerifyPage({ params }: { params: { session_id: string } 
       // Stop camera
       streamRef.current?.getTracks().forEach((t) => t.stop());
     }
-  }, [sessionId, completedChallenges]);
+  }, [sessionId, sessionToken]);
 
   const challenges = session?.challenges || [];
   const currentChallenge = challenges[currentChallengeIdx];

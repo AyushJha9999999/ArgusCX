@@ -30,7 +30,7 @@ async def run_verification_agent(state: AgentState) -> Dict[str, Any]:
     """
     Verifies evidence files submitted with the ticket.
     Runs local EXIF analysis, AI-artifact detection, and C2PA check.
-    Falls back to deterministic demo scenarios when no files are present.
+    Evaluates only submitted evidence that the service can access.
     """
     files = state.ticket.evidence_files
     logger.info("🛡️ Verification agent running", ticket_id=state.ticket.id, file_count=len(files))
@@ -40,26 +40,23 @@ async def run_verification_agent(state: AgentState) -> Dict[str, Any]:
             "fraud_analysis": FraudAnalysisResult(
                 is_suspicious=False,
                 fraud_risk_level=FraudRiskLevel.LOW,
-                fraud_score=0.05,
-                analysis_details={"note": "No evidence files submitted. Minimal fraud risk."},
+                fraud_score=0.0,
+                analysis_details={"status": "not_assessed", "note": "No evidence files were submitted."},
             ),
-            "confidence": 1.0,
-            "reasoning": "No evidence files submitted. Minimal fraud risk.",
+            "confidence": 0.0,
+            "reasoning": "No evidence was submitted; fraud risk could not be assessed.",
         }
 
-    # In demo mode OR when a real file exists — try real analysis first
+    # Analyse accessible evidence locally.
     results = []
     for f in files:
         file_path = Path(f.url) if f.url and not f.url.startswith("http") else None
 
-        # If the user explicitly selected a fraud flag for the demo, override the local analysis
-        if state.ticket.customer.previous_fraud_flags > 0:
-            result = _demo_scenario_for_customer(state.ticket.customer)
-        elif file_path and file_path.exists() and f.file_type.startswith("image/"):
+        if file_path and file_path.exists() and f.file_type.startswith("image/"):
             result = _analyze_local_image(str(file_path), f.file_type)
         else:
-            # No accessible local file — use scenario-based demo
-            result = _demo_scenario_for_customer(state.ticket.customer)
+            # The forensic worker cannot assess this item.
+            result = _unavailable_evidence_result()
         results.append(result)
 
     # Aggregate multi-file results (take worst case)
@@ -299,10 +296,17 @@ def _check_c2pa(path: str, mime_type: str) -> Tuple[Optional[bool], str]:
 
 
 # ─────────────────────────────────────────────
-#  DEMO SCENARIO FALLBACK
+#  EVIDENCE AVAILABILITY FALLBACK
 # ─────────────────────────────────────────────
 
-def _demo_scenario_for_customer(customer) -> FraudAnalysisResult:
+def _unavailable_evidence_result(customer=None) -> FraudAnalysisResult:
+    return FraudAnalysisResult(
+        is_suspicious=False,
+        fraud_risk_level=FraudRiskLevel.LOW,
+        fraud_score=0.0,
+        analysis_details={"status": "not_assessed", "note": "Evidence is unavailable to the forensic worker."},
+    )
+
     """Return a deterministic fraud scenario based on customer fraud history."""
     import random
 
@@ -327,7 +331,7 @@ def _demo_scenario_for_customer(customer) -> FraudAnalysisResult:
                 "ai_detection": f"FAIL — {int(base_ai * 100)}% probability of AI generation",
                 "c2pa": "INVALID — No Content Credentials",
                 "file_integrity": "WARN — Image statistics inconsistent",
-                "note": "Demo scenario: AI-generated fraud (customer has prior fraud flags)",
+                "note": "Legacy branch; not used by the evidence pipeline.",
             },
         )
     elif customer.previous_fraud_flags == 1:
@@ -350,7 +354,7 @@ def _demo_scenario_for_customer(customer) -> FraudAnalysisResult:
                 "ai_detection": f"PASS — Real photo but potentially edited ({int(base_ai * 100)}% AI chance)",
                 "c2pa": "UNKNOWN — No credentials to verify",
                 "file_integrity": "FAIL — Multiple save operations detected",
-                "note": "Demo scenario: Tampered image (customer has one prior fraud flag)",
+                "note": "Legacy branch; not used by the evidence pipeline.",
             },
         )
     else:
@@ -369,7 +373,7 @@ def _demo_scenario_for_customer(customer) -> FraudAnalysisResult:
                 "ai_detection": "PASS — Natural image characteristics",
                 "c2pa": "VALID — Content Credentials present",
                 "file_integrity": "PASS",
-                "note": "Demo scenario: Genuine image (no prior fraud history)",
+                "note": "Legacy branch; not used by the evidence pipeline.",
             },
         )
 

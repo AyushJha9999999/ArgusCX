@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ─────────────────────────────────────────────
   #  FRONTEND — Next.js 14
@@ -12,11 +10,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - ARGUSCX_API_URL=http://backend:8000
       - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
       - NEXT_PUBLIC_APP_NAME=ArgusCX
-      - NEXT_PUBLIC_DEMO_MODE=${NEXT_PUBLIC_DEMO_MODE:-true}
-      - NEXT_PUBLIC_ARGUSCX_KEY=${ARGUSCX_MASTER_KEY:-acx_master_2026_hackathon}
     depends_on:
       - backend
     networks:
@@ -38,7 +34,6 @@ services:
     environment:
       POSTGRES_HOST: postgres
       DATABASE_URL: postgresql+asyncpg://arguscx_user:arguscx_password@postgres:5432/arguscx
-      MONGO_URI: mongodb://mongodb:27017
       REDIS_HOST: redis
       REDIS_URL: redis://:arguscx_redis_password@redis:6379/0
       CELERY_BROKER_URL: redis://:arguscx_redis_password@redis:6379/0

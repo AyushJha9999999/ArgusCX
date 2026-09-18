@@ -171,6 +171,7 @@ export default function AnalyticsPage() {
   const [clusters, setClusters] = useState<{ category: string; total: number; recent: number; spike: boolean }[]>([]);
   const [spikeDetected, setSpikeDetected] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchAll = useCallback(async () => {
     try {
@@ -186,16 +187,19 @@ export default function AnalyticsPage() {
       setClusters(c.clusters);
       setSpikeDetected(c.spike_detected);
     } catch (e) {
-      console.error("Analytics fetch failed:", e);
+      setError(e instanceof Error ? e.message : "Analytics are currently unavailable.");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchAll();
+    const initialLoad = window.setTimeout(() => void fetchAll(), 0);
     const id = setInterval(fetchAll, 15000);
-    return () => clearInterval(id);
+    return () => {
+      window.clearTimeout(initialLoad);
+      clearInterval(id);
+    };
   }, [fetchAll]);
 
   if (loading) {
@@ -203,6 +207,16 @@ export default function AnalyticsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 300 }}>
         <div className="spinner" style={{ width: 32, height: 32 }} />
       </div>
+    );
+  }
+
+  if (error && !summary) {
+    return (
+      <section className="glass-card" style={{ padding: 28, maxWidth: 720 }}>
+        <p className="label">Live analytics unavailable</p>
+        <h1 style={{ margin: "8px 0 10px", fontSize: 24 }}>Connect the ArgusCX API to continue</h1>
+        <p style={{ color: "var(--text-secondary)", lineHeight: 1.7 }}>{error}</p>
+      </section>
     );
   }
 
