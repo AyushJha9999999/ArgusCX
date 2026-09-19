@@ -156,3 +156,64 @@ export const resolveCase = reviewCase;
 export function getSessions(limit = 100) {
   return fetchApi<SessionsResponse>(`/sessions?limit=${encodeURIComponent(String(limit))}`);
 }
+
+export type PerImageAnalysis = {
+  url: string;
+  index: number;
+  overall_recommendation: 'APPROVE' | 'REJECT' | 'ESCALATE';
+  confidence: number;
+  summary: string;
+  product_condition?: {
+    assessment: string;
+    damage_detected: boolean;
+    damage_details?: string;
+    risk_level: 'low' | 'medium' | 'high';
+  };
+  authenticity?: {
+    assessment: string;
+    serial_visible: boolean;
+    brand_markings_valid: boolean;
+    risk_level: 'low' | 'medium' | 'high';
+  };
+  claim_consistency?: {
+    assessment: string;
+    consistent: boolean;
+    discrepancies: string[];
+    risk_level: 'low' | 'medium' | 'high';
+  };
+  fraud_indicators?: {
+    assessment: string;
+    ai_generated_likely: boolean;
+    staging_signs: boolean;
+    image_manipulation_detected: boolean;
+    indicators: string[];
+    risk_level: 'low' | 'medium' | 'high';
+  };
+  key_findings?: string[];
+  error?: string;
+  _note?: string;
+};
+
+export type AnalysisReport = {
+  overall_recommendation: 'APPROVE' | 'REJECT' | 'ESCALATE';
+  confidence: number;
+  summary: string;
+  key_findings: string[];
+  per_image: PerImageAnalysis[];
+  model_used: string;
+  analysed_at: string;
+  image_count: number;
+};
+
+export type AnalyseResponse = {
+  case_id: string;
+  report: AnalysisReport;
+  email_queued: boolean;
+  message: string;
+};
+
+export function analyseCase(caseId: string) {
+  return fetchApi<AnalyseResponse>(`/cases/${encodeURIComponent(caseId)}/analyse`, {
+    method: 'POST',
+  });
+}
