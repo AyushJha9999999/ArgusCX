@@ -93,6 +93,7 @@ async def get_case(case_id: str):
             "assurance_level": session.get("assurance_level"),
             "challenges": session.get("challenge_sequence", []),
             "evidence_ids": session.get("evidence_ids", []),
+            "evidence_urls": session.get("evidence_urls", []),
             "created_at": session.get("created_at"),
         },
     }
@@ -117,7 +118,9 @@ async def review_case(case_id: str, req: ReviewRequest):
         "reviewer_id": req.reviewer_id,
         "reviewer_decision": req.decision.upper(),
         "reviewer_notes": req.notes,
-        "reviewed_at": datetime.utcnow().isoformat()
+        "reviewed_at": datetime.utcnow().isoformat(),
+        "state": req.decision.upper(),
+        "routing": req.decision.upper()
     }
     await cases_col.update_one({"id": case_id}, {"$set": update})
     

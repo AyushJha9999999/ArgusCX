@@ -106,7 +106,7 @@ async def get_me(request: Request):
 
     from app.db.mongodb import get_users_col
     users_col = get_users_col()
-    profile = await users_col.find_one({"sub": sub}) if users_col else None
+    profile = await users_col.find_one({"sub": sub}) if users_col is not None else None
 
     return {
         "sub": sub,

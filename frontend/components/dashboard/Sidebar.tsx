@@ -10,7 +10,7 @@ import SystemHealth from "./SystemHealth";
 const groups = [
   { label: "Workspace", items: [["/dashboard", "Overview", LayoutDashboard], ["/dashboard/profile", "Profile", UserRound], ["/dashboard/verify-new", "New verification", ClipboardCheck], ["/dashboard/sessions", "Sessions", Activity], ["/dashboard/cases", "Cases", FileCheck2], ["/dashboard/queue", "Review queue", Gauge]] },
   { label: "Intelligence", items: [["/dashboard/analytics", "Analytics", BarChart3], ["/dashboard/company", "Company", Building2], ["/dashboard/fraud", "Relationships", GitBranch], ["/dashboard/evidence", "Evidence", FileText]] },
-  { label: "Platform", items: [["/getstarted", "Readiness plan", BookOpen], ["/dashboard/api", "API & credentials", KeyRound], ["/dashboard/policies", "Policies", ShieldCheck]] },
+  { label: "Platform", items: [["/dashboard/api", "API & credentials", KeyRound], ["/dashboard/policies", "Policies", ShieldCheck]] },
   { label: "System", items: [["/dashboard/audit", "Audit log", Braces], ["/dashboard/settings", "Settings", Settings2]] },
 ] as const;
 

@@ -42,53 +42,43 @@ def _guess_content_type(filename: str) -> str:
     }.get(ext, "application/octet-stream")
 
 
-def _is_s3_configured() -> bool:
+def _is_storage_configured() -> bool:
     return bool(
-        settings.OBJECT_STORAGE_BUCKET
-        and settings.OBJECT_STORAGE_ACCESS_KEY
-        and settings.OBJECT_STORAGE_SECRET_KEY
+        settings.CLOUDINARY_CLOUD_NAME
+        and settings.CLOUDINARY_API_KEY
+        and settings.CLOUDINARY_API_SECRET
     )
 
-
-async def _upload_to_s3(file_bytes: bytes, s3_key: str, content_type: str) -> str:
-    """Upload bytes to AWS S3 and return the public HTTPS URL."""
-    import aioboto3
-    from botocore.config import Config
-
-    region = settings.OBJECT_STORAGE_REGION or "ap-southeast-1"
-    bucket = settings.OBJECT_STORAGE_BUCKET
-
-    session = aioboto3.Session(
-        aws_access_key_id=settings.OBJECT_STORAGE_ACCESS_KEY.get_secret_value(),
-        aws_secret_access_key=settings.OBJECT_STORAGE_SECRET_KEY.get_secret_value(),
-        region_name=region,
+def _init_cloudinary():
+    if not _is_storage_configured():
+        return
+    import cloudinary
+    cloudinary.config(
+        cloud_name=settings.CLOUDINARY_CLOUD_NAME,
+        api_key=settings.CLOUDINARY_API_KEY,
+        api_secret=settings.CLOUDINARY_API_SECRET,
+        secure=True
     )
 
-    config = Config(region_name=region, signature_version="s3v4")
+async def _upload_to_cloudinary(file_bytes: bytes, evidence_id: str, filename: str) -> str:
+    import cloudinary.uploader
+    from fastapi.concurrency import run_in_threadpool
     
-    # Use endpoint_url only if explicitly overridden (for Cloudflare R2 etc.)
-    # For standard AWS S3, let boto3 resolve the regional endpoint automatically.
-    endpoint_url = None
-    if settings.OBJECT_STORAGE_ENDPOINT and "amazonaws.com" not in settings.OBJECT_STORAGE_ENDPOINT:
-        endpoint_url = settings.OBJECT_STORAGE_ENDPOINT
-
-    async with session.client("s3", endpoint_url=endpoint_url, config=config) as s3:
-        await s3.put_object(
-            Bucket=bucket,
-            Key=s3_key,
-            Body=file_bytes,
-            ContentType=content_type,
-        )
-
-    # Return the canonical S3 URL
-    return f"https://{bucket}.s3.{region}.amazonaws.com/{s3_key}"
-
+    # Run the synchronous Cloudinary upload function in a threadpool
+    result = await run_in_threadpool(
+        cloudinary.uploader.upload,
+        file_bytes,
+        folder=f"arguscx/evidence/{evidence_id}",
+        public_id=Path(filename).stem,
+        resource_type="auto"
+    )
+    return result.get("secure_url")
 
 @router.post("/upload", response_model=EvidenceFile)
 async def upload_evidence(file: UploadFile = File(...)):
     """
     Upload an evidence file (image, video, invoice).
-    Uses AWS S3 bucket 'arguscx-uploads-rimo-1734' in ap-southeast-1 when configured.
+    Uses Cloudinary when configured.
     Falls back to local disk under ./uploads/{id}/{filename} otherwise.
     """
     if not file.filename:
@@ -103,24 +93,22 @@ async def upload_evidence(file: UploadFile = File(...)):
     destination = "local"
     final_url = ""
 
-    if _is_s3_configured():
-        s3_key = f"evidence/{evidence_id}/{safe_name}"
+    if _is_storage_configured():
+        _init_cloudinary()
         try:
-            final_url = await _upload_to_s3(file_bytes, s3_key, content_type)
-            destination = "s3"
+            final_url = await _upload_to_cloudinary(file_bytes, evidence_id, safe_name)
+            destination = "cloudinary"
             logger.info(
-                "Evidence uploaded to S3",
+                "Evidence uploaded to Cloudinary",
                 evidence_id=evidence_id,
-                bucket=settings.OBJECT_STORAGE_BUCKET,
-                key=s3_key,
+                url=final_url,
                 size_bytes=size_bytes,
             )
         except Exception as exc:
-            logger.error("S3 upload failed, falling back to local disk", error=str(exc))
-            # Fall through to local storage on S3 error
+            logger.error("Cloudinary upload failed, falling back to local disk", error=str(exc))
             destination = "local_fallback"
 
-    if destination != "s3":
+    if destination != "cloudinary":
         target_dir = _ensure_upload_dir(evidence_id)
         target_path = target_dir / safe_name
         try:
@@ -148,7 +136,7 @@ async def upload_evidence(file: UploadFile = File(...)):
 
 @router.get("/uploads/{evidence_id}/{filename}")
 async def serve_evidence(evidence_id: str, filename: str):
-    """Serve a locally stored evidence file (used when S3 is not configured)."""
+    """Serve a locally stored evidence file (used when Cloudinary is not configured)."""
     safe_name = Path(filename).name
     target_path = UPLOAD_DIR / evidence_id / safe_name
     if not target_path.exists():
@@ -160,32 +148,24 @@ async def serve_evidence(evidence_id: str, filename: str):
 
 @router.get("/health")
 async def storage_health():
-    """Check if S3 is reachable and the bucket is accessible."""
-    if not _is_s3_configured():
-        return {"storage": "local", "s3_configured": False}
+    """Check if Cloudinary is configured and reachable."""
+    if not _is_storage_configured():
+        return {"storage": "local", "cloudinary_configured": False}
 
     try:
-        import aioboto3
-        region = settings.OBJECT_STORAGE_REGION or "ap-southeast-1"
-        session = aioboto3.Session(
-            aws_access_key_id=settings.OBJECT_STORAGE_ACCESS_KEY.get_secret_value(),
-            aws_secret_access_key=settings.OBJECT_STORAGE_SECRET_KEY.get_secret_value(),
-            region_name=region,
-        )
-        async with session.client("s3", region_name=region) as s3:
-            await s3.head_bucket(Bucket=settings.OBJECT_STORAGE_BUCKET)
+        _init_cloudinary()
+        import cloudinary.api
+        from fastapi.concurrency import run_in_threadpool
+        await run_in_threadpool(cloudinary.api.ping)
         return {
-            "storage": "s3",
-            "s3_configured": True,
-            "bucket": settings.OBJECT_STORAGE_BUCKET,
-            "region": region,
+            "storage": "cloudinary",
+            "cloudinary_configured": True,
             "status": "reachable",
         }
     except Exception as exc:
         return {
-            "storage": "s3",
-            "s3_configured": True,
-            "bucket": settings.OBJECT_STORAGE_BUCKET,
+            "storage": "cloudinary",
+            "cloudinary_configured": True,
             "status": "error",
             "detail": str(exc),
         }

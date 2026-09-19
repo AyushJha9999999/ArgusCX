@@ -56,9 +56,9 @@ async def deliver_webhook(
             resp = await client.post(url, content=body, headers=headers)
             ok = 200 <= resp.status_code < 300
             if ok:
-                logger.info("Webhook delivered", url=url, event=event, status=resp.status_code)
+                logger.info("Webhook delivered", url=url, event_type=event, status=resp.status_code)
             else:
-                logger.warning("Webhook failed", url=url, event=event, status=resp.status_code)
+                logger.warning("Webhook failed", url=url, event_type=event, status=resp.status_code)
             return ok
     except Exception as exc:
         logger.error("Webhook exception", url=url, error=str(exc), attempt=attempt)

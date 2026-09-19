@@ -41,17 +41,22 @@ export default function OnboardingPage() {
   const checkOnboarding = useCallback(async () => {
     const token = localStorage.getItem("arguscx_dashboard_token");
     if (!token) { router.push("/login"); return; }
+    
+    // If user clicked "Switch Workspace", allow them to stay on the page
+    const urlParams = new URLSearchParams(window.location.search);
+    const forceEdit = urlParams.get("edit") === "true";
+    
     try {
       const res = await fetch(`${API}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.onboarding_complete) {
+        if (data.onboarding_complete && !forceEdit) {
           router.push("/dashboard");
           return;
         }
-        // Pre-fill if partial
+        // Pre-fill if partial or editing
         if (data.company_name) setCompanyName(data.company_name);
         if (data.industry) setIndustry(data.industry);
         if (data.company_size) setCompanySize(data.company_size);
@@ -238,11 +243,11 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "var(--bg-primary, #0a0f1e)",
+    background: "#000000",
     position: "relative",
     overflow: "hidden",
     padding: 24,
-    fontFamily: "'Inter', sans-serif",
+    fontFamily: "var(--font-sans)",
   },
   orb: {
     position: "absolute",
@@ -253,11 +258,12 @@ const styles: Record<string, React.CSSProperties> = {
   card: {
     width: "100%",
     maxWidth: 560,
-    background: "rgba(15,23,42,0.85)",
+    background: "rgba(10,10,10,0.6)",
     border: "1px solid rgba(255,255,255,0.08)",
+    borderTop: "1px solid rgba(255,255,255,0.12)",
     borderRadius: 24,
     backdropFilter: "blur(24px)",
-    boxShadow: "0 32px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(99,102,241,0.1)",
+    boxShadow: "0 32px 80px rgba(0,0,0,0.5)",
     overflow: "hidden",
   },
   header: {
@@ -289,8 +295,8 @@ const styles: Record<string, React.CSSProperties> = {
     width: 56,
     height: 56,
     borderRadius: 16,
-    background: "rgba(99,102,241,0.1)",
-    border: "1px solid rgba(99,102,241,0.2)",
+    background: "rgba(255,255,255,0.05)",
+    border: "1px solid rgba(255,255,255,0.1)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -299,24 +305,24 @@ const styles: Record<string, React.CSSProperties> = {
   title: {
     fontSize: 26,
     fontWeight: 800,
-    color: "var(--text-primary, #f1f5f9)",
+    color: "#fff",
     letterSpacing: "-0.02em",
     lineHeight: 1.2,
     margin: 0,
   },
   sub: {
     fontSize: 14,
-    color: "rgba(148,163,184,0.9)",
+    color: "rgba(255,255,255,0.6)",
     lineHeight: 1.6,
     margin: "0 0 6px",
   },
   input: {
     width: "100%",
     padding: "14px 18px",
-    background: "rgba(255,255,255,0.04)",
+    background: "rgba(255,255,255,0.02)",
     border: "1.5px solid rgba(255,255,255,0.1)",
     borderRadius: 12,
-    color: "var(--text-primary, #f1f5f9)",
+    color: "#fff",
     fontSize: 16,
     fontWeight: 500,
     outline: "none",
@@ -343,9 +349,9 @@ const styles: Record<string, React.CSSProperties> = {
   chip: {
     padding: "9px 14px",
     borderRadius: 10,
-    background: "rgba(255,255,255,0.04)",
-    border: "1.5px solid rgba(255,255,255,0.08)",
-    color: "rgba(203,213,225,0.9)",
+    background: "rgba(255,255,255,0.02)",
+    border: "1.5px solid rgba(255,255,255,0.1)",
+    color: "rgba(255,255,255,0.6)",
     fontSize: 13,
     fontWeight: 500,
     cursor: "pointer",
@@ -354,25 +360,25 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "center",
   },
   chipActive: {
-    background: "rgba(99,102,241,0.15)",
-    border: "1.5px solid rgba(99,102,241,0.6)",
-    color: "#a5b4fc",
-    boxShadow: "0 0 12px rgba(99,102,241,0.2)",
+    background: "rgba(155, 231, 197, 0.1)",
+    border: "1.5px solid rgba(155, 231, 197, 0.6)",
+    color: "#9BE7C5",
+    boxShadow: "0 0 12px rgba(155, 231, 197, 0.2)",
   },
   btn: {
     display: "flex",
     alignItems: "center",
     gap: 8,
     padding: "13px 24px",
-    background: "linear-gradient(135deg, #6366f1, #0ea5e9)",
-    border: "none",
+    background: "linear-gradient(135deg, #222, #111)",
+    border: "1px solid rgba(255,255,255,0.15)",
     borderRadius: 12,
     color: "#fff",
     fontSize: 15,
     fontWeight: 700,
     cursor: "pointer",
     transition: "all 0.2s",
-    boxShadow: "0 4px 20px rgba(99,102,241,0.35)",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
     fontFamily: "inherit",
   },
   btnGhost: {
@@ -430,7 +436,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   loadingFill: {
     height: "100%",
-    background: "linear-gradient(90deg, #6366f1, #10b981)",
+    background: "linear-gradient(90deg, #b58cff, #9BE7C5)",
     borderRadius: 2,
     animation: "fillBar 1.2s ease forwards",
     width: "100%",

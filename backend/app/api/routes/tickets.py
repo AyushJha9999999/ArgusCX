@@ -99,12 +99,22 @@ async def submit_ticket(request: SubmitTicketRequest):
     for i, url in enumerate(request.evidence_urls):
         from pathlib import Path
         p = Path(url)
+        
+        is_http = url.startswith("http://") or url.startswith("https://")
+        size_bytes = 0
+        if not is_http:
+            try:
+                if p.exists():
+                    size_bytes = p.stat().st_size
+            except Exception:
+                pass
+                
         evidence_files.append(EvidenceFile(
             id=request.evidence_file_ids[i] if i < len(request.evidence_file_ids) else f"ev-{i}",
             filename=p.name,
             url=url,
             file_type=_guess_mime(p.suffix),
-            size_bytes=p.stat().st_size if p.exists() else 0,
+            size_bytes=size_bytes,
         ))
 
     ticket = Ticket(

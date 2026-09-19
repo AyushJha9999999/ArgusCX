@@ -121,14 +121,21 @@ export default function CaseDetail() {
           <div className={styles.panelTitle}>Cryptographic Evidence</div>
           <div className={styles.imageGrid}>
             {data.session?.evidence_ids?.length > 0 ? (
-              data.session.evidence_ids.map((eid: string) => (
-                <div key={eid} className={styles.imageCard}>
-                  <div className={styles.imageTag}>EVIDENCE</div>
-                  <div className={styles.image} style={{ display: 'grid', placeItems: 'center', padding: 16, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-                    {eid}
+              data.session.evidence_ids.map((eid: string, idx: number) => {
+                const url = data.session.evidence_urls?.[idx];
+                return (
+                  <div key={eid} className={styles.imageCard}>
+                    <div className={styles.imageTag}>EVIDENCE</div>
+                    <div className={styles.image} style={{ display: 'grid', placeItems: 'center', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12, overflow: 'hidden' }}>
+                      {url ? (
+                        <img src={url} alt={`Evidence ${eid}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ padding: 16 }}>{eid}</div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div style={{ color: 'var(--text-muted)' }}>No cryptographic evidence attached to this session.</div>
             )}

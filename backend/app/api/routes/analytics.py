@@ -36,7 +36,7 @@ async def company_analytics(request: Request):
     # Look up real company profile from MongoDB
     from app.db.mongodb import get_users_col
     users_col = get_users_col()
-    profile = await users_col.find_one({"sub": sub}) if users_col and sub else None
+    profile = await users_col.find_one({"sub": sub}) if users_col is not None and sub else None
     company_name = (profile or {}).get("company_name") or email.split("@")[0].title() if email else "ArgusCX"
     tenant_id = sub  # sessions are scoped per user sub
 

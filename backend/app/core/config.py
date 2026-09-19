@@ -84,14 +84,10 @@ class Settings(BaseSettings):
     HUMAN_HANDOFF_WEBHOOK_URL: Optional[str] = None
     HUMAN_HANDOFF_WEBHOOK_SECRET: Optional[SecretStr] = None
 
-    # S3-compatible evidence storage. Configure all fields together; the
-    # platform refuses to emit invented upload URLs when storage is absent.
-    OBJECT_STORAGE_ENDPOINT: Optional[str] = None
-    OBJECT_STORAGE_ACCESS_KEY: Optional[SecretStr] = None
-    OBJECT_STORAGE_SECRET_KEY: Optional[SecretStr] = None
-    OBJECT_STORAGE_BUCKET: Optional[str] = None
-    OBJECT_STORAGE_REGION: str = "ap-southeast-1"
-    OBJECT_STORAGE_SECURE: bool = True
+    # ── Cloudinary Evidence Storage ──────────────────────────
+    CLOUDINARY_CLOUD_NAME: Optional[str] = None
+    CLOUDINARY_API_KEY: Optional[str] = None
+    CLOUDINARY_API_SECRET: Optional[str] = None
 
     # ── PostgreSQL ────────────────────────────
     POSTGRES_HOST: Optional[str] = None
@@ -125,12 +121,7 @@ class Settings(BaseSettings):
     EXIF_CHECK_ENABLED: bool = True
     AI_ARTIFACT_DETECTION_ENABLED: bool = True
 
-    # ── Object Storage (S3 / R2) ─────────────
-    OBJECT_STORAGE_ENDPOINT: Optional[str] = None
-    OBJECT_STORAGE_REGION: str = "us-east-1"
-    OBJECT_STORAGE_BUCKET: Optional[str] = None
-    OBJECT_STORAGE_ACCESS_KEY: Optional[SecretStr] = None
-    OBJECT_STORAGE_SECRET_KEY: Optional[SecretStr] = None
+
 
     # ── Local File Storage ────────────────────
     UPLOAD_DIR: str = "uploads"

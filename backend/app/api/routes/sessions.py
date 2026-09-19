@@ -90,6 +90,7 @@ class SessionStatusResponse(BaseModel):
 class SessionCompleteRequest(BaseModel):
     assurance_level: str = "live_video"
     evidence_ids: List[str] = []
+    evidence_urls: List[str] = []
 
 
 class OutboundEvidenceRequest(BaseModel):
@@ -296,6 +297,7 @@ async def complete_session(
     session["status"] = "analysing"
     session["assurance_level"] = req.assurance_level
     session["evidence_ids"] = req.evidence_ids
+    session["evidence_urls"] = req.evidence_urls
     session["completed_at"] = datetime.utcnow().isoformat()
 
     await sessions_col.update_one(
@@ -304,6 +306,7 @@ async def complete_session(
             "status": "analysing",
             "assurance_level": req.assurance_level,
             "evidence_ids": req.evidence_ids,
+            "evidence_urls": req.evidence_urls,
             "completed_at": session["completed_at"]
         }}
     )

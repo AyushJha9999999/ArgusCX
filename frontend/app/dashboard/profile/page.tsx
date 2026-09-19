@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowUpRight, Bot, Cloud, Database, KeyRound, RefreshCw, Server, ShieldCheck, UserRound, Workflow } from "lucide-react";
+import { ArrowUpRight, Bot, Building2, Cloud, Database, KeyRound, RefreshCw, Server, ShieldCheck, UserRound, Workflow } from "lucide-react";
 import { fetchApi } from "../../../lib/api_cases";
 import SignOutButton from "../../../components/dashboard/SignOutButton";
 
@@ -133,7 +133,10 @@ export default function ProfilePage() {
           <p className="label">Admin controls</p>
           <h2>Secure the real connections</h2>
           <p>Credentials stay in deployment environment variables. Use the platform controls to create scoped API credentials and a readiness plan without placing provider secrets in the browser.</p>
-          <div><Link href="/dashboard/api" className="btn-primary"><KeyRound size={15} />API credentials</Link></div>
+          <div style={{ display: "flex", gap: 12 }}>
+            <Link href="/dashboard/api" className="btn-primary"><KeyRound size={15} />API credentials</Link>
+            <Link href="/onboarding?edit=true" className="btn-ghost"><Building2 size={15} />Switch Workspace</Link>
+          </div>
         </article>
       </div>
     </section>

@@ -102,6 +102,7 @@ export async function fetchApi<T>(endpoint: string, options: RequestInit = {}): 
       ...options,
       headers,
       credentials: "same-origin",
+      cache: "no-store",
     });
   } catch {
     throw new ApiRequestError("ArgusCX API is unavailable through the configured proxy. Start the backend and try again.");
@@ -119,6 +120,14 @@ export async function fetchApi<T>(endpoint: string, options: RequestInit = {}): 
     } catch {
       // A non-JSON error response is still represented by its status below.
     }
+    
+    if (response.status === 401) {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("arguscx_dashboard_token");
+        window.location.href = "/login";
+      }
+    }
+    
     throw new ApiRequestError(`${detail} (HTTP ${response.status})`, response.status);
   }
 

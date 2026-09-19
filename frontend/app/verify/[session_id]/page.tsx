@@ -48,6 +48,7 @@ export default function VerifyPage() {
   const [error, setError] = useState<string>("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [qualityWarning, setQualityWarning] = useState<string>("");
+  const [capturedFrames, setCapturedFrames] = useState<{ blob: Blob; challengeIdx: number }[]>([]);
 
   // Re-attach the stream once the <video> element is actually in the DOM.
   // requestCamera() may call setPhase("challenge") before the video element
@@ -116,20 +117,41 @@ export default function VerifyPage() {
     }
   }, []);
 
-  const completeChallenge = useCallback(() => {
+  const captureFrame = async (): Promise<Blob | null> => {
+    if (!videoRef.current) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
+    });
+  };
+
+  const completeChallenge = useCallback(async () => {
     const idx = currentChallengeIdx;
+    
+    const blob = await captureFrame();
+    const newFrames = blob ? [...capturedFrames, { blob, challengeIdx: idx }] : capturedFrames;
+    if (blob) {
+      setCapturedFrames(newFrames);
+    }
+
     const nextCompleted = [...completedChallenges, idx];
     setCompletedChallenges(nextCompleted);
     const challenges = session?.challenges || [];
     if (idx + 1 >= challenges.length) {
       // All challenges done -- submit
-      submitSession(nextCompleted);
+      submitSession(nextCompleted, newFrames);
     } else {
       setCurrentChallengeIdx(idx + 1);
     }
-  }, [completedChallenges, currentChallengeIdx, session]);
+  }, [completedChallenges, currentChallengeIdx, session, capturedFrames]);
 
-  const submitSession = useCallback(async (challengeIndexes: number[]) => {
+  const submitSession = useCallback(async (challengeIndexes: number[], framesToUpload: { blob: Blob; challengeIdx: number }[]) => {
     if (!sessionToken) {
       setError("This verification link is incomplete. Request a new link from support.");
       setPhase("error");
@@ -138,12 +160,40 @@ export default function VerifyPage() {
     setPhase("uploading");
     setUploadProgress(10);
     try {
+      const evidenceIds: string[] = [];
+      const evidenceUrls: string[] = [];
+
+      for (let i = 0; i < framesToUpload.length; i++) {
+        const { blob, challengeIdx } = framesToUpload[i];
+        setUploadProgress(10 + (i / framesToUpload.length) * 40); // 10% to 50%
+        const formData = new FormData();
+        formData.append("file", blob, `frame_${challengeIdx}_${Date.now()}.jpg`);
+        
+        try {
+          const uploadRes = await fetch("/api/v1/evidence/upload", {
+            method: "POST",
+            body: formData,
+          });
+          if (uploadRes.ok) {
+            const result = await uploadRes.json();
+            evidenceIds.push(result.id);
+            evidenceUrls.push(result.url);
+          } else {
+            evidenceIds.push(`frame_${challengeIdx}_${Date.now()}`);
+          }
+        } catch (e) {
+          evidenceIds.push(`frame_${challengeIdx}_${Date.now()}`);
+        }
+      }
+
+      setUploadProgress(60);
       const resp = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Session-Token": sessionToken },
         body: JSON.stringify({
           assurance_level: "live_video",
-          evidence_ids: challengeIndexes.map((i) => `frame_${i}_${Date.now()}`),
+          evidence_ids: evidenceIds.length > 0 ? evidenceIds : challengeIndexes.map((i) => `frame_${i}_${Date.now()}`),
+          evidence_urls: evidenceUrls,
         }),
       });
       setUploadProgress(100);

@@ -20,7 +20,6 @@ from app.core.logging import setup_logging
 from app.core.api_key_middleware import APIKeyMiddleware
 from app.db.postgres import init_db, close_db
 from app.db.mongodb import init_mongo, close_mongo
-from app.db.redis_client import init_redis, close_redis
 from app.rag.indexer import init_rag_index
 
 logger = structlog.get_logger(__name__)
@@ -34,7 +33,6 @@ async def lifespan(app: FastAPI):
     # Initialize databases (graceful — won't crash if DB is unavailable)
     await init_db()
     await init_mongo()
-    await init_redis()
 
     # Initialize RAG index with knowledge base
     await init_rag_index()
@@ -51,7 +49,6 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 ArgusCX shutting down...")
     await close_db()
     await close_mongo()
-    await close_redis()
 
 
 # ─────────────────────────────────────────────

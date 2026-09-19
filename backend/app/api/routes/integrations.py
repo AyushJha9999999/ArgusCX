@@ -11,7 +11,6 @@ from app.connectors.shopify import ShopifyConnector
 from app.connectors.stripe import StripeConnector
 from app.core.config import settings
 from app.db.mongodb import get_mongo_db
-from app.db.redis_client import get_redis
 from app.db import postgres
 
 router = APIRouter(prefix="/integrations")
@@ -28,10 +27,10 @@ async def list_integrations():
             return "connected"
         return "unreachable" if configured else "not_configured"
 
-    object_storage_configured = bool(
-        settings.OBJECT_STORAGE_BUCKET
-        and settings.OBJECT_STORAGE_ACCESS_KEY
-        and settings.OBJECT_STORAGE_SECRET_KEY
+    cloudinary_configured = bool(
+        settings.CLOUDINARY_CLOUD_NAME
+        and settings.CLOUDINARY_API_KEY
+        and settings.CLOUDINARY_API_SECRET
     )
 
     return {
@@ -49,38 +48,13 @@ async def list_integrations():
                 ),
                 "description": "Case records, evidence metadata, and investigation history.",
             },
+
             {
-                "connector": "postgresql",
-                "category": "data",
-                "mode": service_state(
-                    configured=bool(settings.DATABASE_URL),
-                    connected=postgres.AsyncSessionLocal is not None,
-                ),
-                "status": service_state(
-                    configured=bool(settings.DATABASE_URL),
-                    connected=postgres.AsyncSessionLocal is not None,
-                ),
-                "description": "Tenant, credential, and operational data.",
-            },
-            {
-                "connector": "redis",
-                "category": "data",
-                "mode": service_state(
-                    configured=bool(settings.REDIS_URL),
-                    connected=get_redis() is not None,
-                ),
-                "status": service_state(
-                    configured=bool(settings.REDIS_URL),
-                    connected=get_redis() is not None,
-                ),
-                "description": "Live cache, rate limits, and background work coordination.",
-            },
-            {
-                "connector": "object_storage",
+                "connector": "cloudinary",
                 "category": "cloud",
-                "mode": "configured" if object_storage_configured else "not_configured",
-                "status": "configured" if object_storage_configured else "not_configured",
-                "description": "S3-compatible evidence storage. Runtime upload checks happen when evidence is submitted.",
+                "mode": "configured" if cloudinary_configured else "not_configured",
+                "status": "configured" if cloudinary_configured else "not_configured",
+                "description": "Cloudinary evidence storage. Runtime upload checks happen when evidence is submitted.",
             },
             await shopify.health_check(),
             await stripe.health_check(),
