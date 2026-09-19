@@ -27,7 +27,7 @@ from app.core.config import settings
 logger = structlog.get_logger(__name__)
 
 # ── Groq vision model — best free-tier option ─────────────────────────────────
-VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+VISION_MODEL = "llama-3.2-11b-vision-preview"
 FALLBACK_MODEL = "llama-3.3-70b-versatile"   # text-only fallback (no images)
 
 GROQ_VISION_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -101,19 +101,25 @@ async def analyse_evidence_images(
     if not valid_urls:
         return _no_evidence_fallback()
 
-    for idx, url in enumerate(valid_urls):
+    total = len(valid_urls)
+
+    for idx, url in enumerate(valid_urls, start=1):
+        if idx > 1:
+            await asyncio.sleep(1.0)  # Rate limit protection for Groq API
         try:
-            result = await _analyse_single_image(url, context, idx + 1, len(valid_urls))
-            per_image.append({"url": url, "index": idx + 1, **result})
-        except Exception as exc:
-            logger.warning("Vision analysis failed for image", url=url, error=str(exc))
+            res = await _analyse_single_image(url, context, idx, total)
+            res["url"] = url
+            res["index"] = idx
+            per_image.append(res)
+        except Exception as e:
+            logger.warning("Vision analysis failed for image", url=url, error=str(e))
             per_image.append({
                 "url": url,
-                "index": idx + 1,
-                "error": str(exc),
+                "index": idx,
                 "overall_recommendation": "ESCALATE",
-                "confidence": 0.3,
-                "summary": "Image could not be analysed. Manual review recommended.",
+                "confidence": 0.0,
+                "summary": "Analysis failed due to a system error.",
+                "error": str(e)
             })
 
     aggregate = _aggregate_results(per_image)
