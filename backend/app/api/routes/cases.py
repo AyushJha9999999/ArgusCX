@@ -76,6 +76,7 @@ async def list_cases(
 @router.get("/{case_id}")
 async def get_case(case_id: str):
     """Full case report with all signals and evidence."""
+    case_id = case_id.lower()
     cases_col = get_cases_col()
     sessions_col = get_sessions_col()
     if cases_col is None or sessions_col is None:
@@ -116,6 +117,7 @@ async def get_case(case_id: str):
 @router.post("/{case_id}/review")
 async def review_case(case_id: str, req: ReviewRequest):
     """Reviewer submits a decision on a case."""
+    case_id = case_id.lower()
     cases_col = get_cases_col()
     if cases_col is None:
         raise HTTPException(status_code=500, detail="Database not available")
@@ -145,6 +147,7 @@ async def review_case(case_id: str, req: ReviewRequest):
 @router.post("/{case_id}/escalate")
 async def escalate_case(case_id: str, reason: Optional[str] = None):
     """Force a case to REVIEW_REQUIRED state."""
+    case_id = case_id.lower()
     cases_col = get_cases_col()
     if cases_col is None:
         raise HTTPException(status_code=500, detail="Database not available")
@@ -182,6 +185,7 @@ async def analyse_case(
     - Sends a rich HTML email to the company inbox with one-click Approve/Reject links
     Returns the analysis report immediately.
     """
+    case_id = case_id.lower()
     cases_col = get_cases_col()
     sessions_col = get_sessions_col()
     if cases_col is None or sessions_col is None:
@@ -266,6 +270,7 @@ async def handle_email_action(
     Validates the signed token, records the decision, and returns a
     confirmation HTML page.
     """
+    case_id = case_id.lower()
     valid_actions = {"APPROVED", "REJECTED"}
     action = action.upper()
     if action not in valid_actions:
