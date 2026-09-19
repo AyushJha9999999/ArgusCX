@@ -29,6 +29,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         "/api/v1/onboarding/assessment",
     }
     EXEMPT_PREFIXES = ("/ws/", "/docs", "/redoc")
+    # Email action links are self-contained (HMAC-signed tokens) — no API key needed
+    EXEMPT_SUFFIXES = ("/email-action",)
 
     @staticmethod
     async def _has_valid_session_token(request: Request) -> bool:
@@ -67,6 +69,9 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         for prefix in self.EXEMPT_PREFIXES:
             if path.startswith(prefix):
+                return await call_next(request)
+        for suffix in self.EXEMPT_SUFFIXES:
+            if path.endswith(suffix):
                 return await call_next(request)
 
         if await self._has_valid_session_token(request):
